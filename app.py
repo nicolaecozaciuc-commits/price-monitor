@@ -184,7 +184,9 @@ def extract_prices_from_text(text):
 
 # ============ METODA 3: EXTRACȚIE HTML STRUCTURAT ============
 def extract_from_google_html(page, sku):
-    """Extrage prețuri din structura HTML a paginii Google"""
+    """Extrage prețuri din structura HTML a paginii Google
+    SKIPEAZĂ site-urile din BLOCKED (cache invalid)
+    """
     results = []
     try:
         html_content = page.content()
@@ -201,7 +203,11 @@ def extract_from_google_html(page, sku):
             domain = match.group(1).lower()
             price = clean_price(match.group(2))
             
-            if not domain or len(domain) < 5 or any(b in domain for b in BLOCKED):
+            # ✅ SKIP site-urile cu cache invalid
+            if any(b in domain for b in BLOCKED):
+                continue
+            
+            if not domain or len(domain) < 5:
                 continue
             if price <= 0:
                 continue
@@ -226,8 +232,11 @@ def extract_from_google_html(page, sku):
             price = clean_price(match.group(1))
             domain = match.group(2).lower()
             
-            if not domain or len(domain) < 5 or any(b in domain for b in BLOCKED):
+            # ✅ SKIP site-urile cu cache invalid
+            if any(b in domain for b in BLOCKED):
                 continue
+            
+            if not domain or len(domain) < 5:
             if price <= 0:
                 continue
             if any(r['domain'] == domain for r in results):
