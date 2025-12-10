@@ -1,8 +1,9 @@
 import re
 import logging
 import time
+import os
 from urllib.parse import quote_plus
-from flask import Flask, request, jsonify, render_template
+from flask import Flask, request, jsonify, render_template, send_file
 from flask_cors import CORS
 from playwright.sync_api import sync_playwright
 
@@ -13,6 +14,9 @@ log = logging.getLogger('werkzeug')
 log.setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s | %(message)s', datefmt='%H:%M:%S')
 logger = logging.getLogger('PriceMonitor')
+
+DEBUG_DIR = '/root/monitor/debug'
+os.makedirs(DEBUG_DIR, exist_ok=True)
 
 BLOCKED = ['google', 'bing', 'microsoft', 'facebook', 'youtube', 'doarbai', 'termohabitat', 
            'wikipedia', 'amazon', 'ebay', 'olx', 'kaufland', 'anre']
@@ -40,18 +44,17 @@ def is_valid_domain(domain):
     return match and len(match.group(1)) >= 3
 
 def extract_from_bing(page):
-    """Extrage prețuri din Bing - EXACT ca v7.2 care funcționa"""
     results = []
     
     try:
-        # Parsează rezultatele Bing
+        algo_count = len(page.locator('.b_algo').all())
+        logger.info(f"      .b_algo count: {algo_count}")
+        
         for result in page.locator('.b_algo').all()[:15]:
             try:
-                # URL
                 link = result.locator('a').first
                 href = link.get_attribute('href') or ''
                 
-                # Domain
                 domain_match = re.search(r'https?://(?:www\.)?([a-z0-9-]+\.ro)', href.lower())
                 if not domain_match:
                     continue
@@ -60,7 +63,6 @@ def extract_from_bing(page):
                 if not is_valid_domain(domain):
                     continue
                 
-                # Preț din text
                 text = result.inner_text()
                 price_match = re.search(r'([\d.,]+)\s*(?:RON|Lei|lei|Ron)', text)
                 if price_match:
@@ -77,8 +79,8 @@ def extract_from_bing(page):
             except:
                 continue
                 
-    except:
-        pass
+    except Exception as e:
+        logger.info(f"      Extract error: {e}")
     
     return results
 
@@ -99,26 +101,29 @@ def scan_product(sku, name, your_price=0):
         page = context.new_page()
         
         try:
-            # Bing search - EXACT ca v7.2
             query = f"{sku} pret"
             url = f"https://www.bing.com/search?q={quote_plus(query)}"
             
             logger.info(f"   🔍 Bing: {query}")
             
             page.goto(url, timeout=20000, wait_until='domcontentloaded')
-            time.sleep(2)
+            time.sleep(3)
+            
+            # Screenshot pentru debug
+            screenshot_path = f"{DEBUG_DIR}/bing_{sku}.png"
+            page.screenshot(path=screenshot_path)
+            logger.info(f"   📸 Screenshot salvat: {screenshot_path}")
             
             # Accept cookies
             try:
                 page.click('#bnp_btn_accept', timeout=2000)
-                time.sleep(0.5)
+                time.sleep(1)
+                page.screenshot(path=f"{DEBUG_DIR}/bing_{sku}_after_cookies.png")
             except:
                 pass
             
-            # Extrage
             found = extract_from_bing(page)
             
-            # Deduplicate
             seen = {}
             unique = []
             for r in found:
@@ -153,6 +158,13 @@ def api_check():
     results = scan_product(data.get('sku', ''), data.get('name', ''), your_price)
     return jsonify({"status": "success", "competitors": results})
 
+@app.route('/debug/<filename>')
+def get_debug(filename):
+    filepath = f"{DEBUG_DIR}/{filename}"
+    if os.path.exists(filepath):
+        return send_file(filepath)
+    return "Not found", 404
+
 if __name__ == '__main__':
-    logger.info("🚀 PriceMonitor v7.2-restored pe :8080")
+    logger.info("🚀 PriceMonitor v7.8 (Debug) pe :8080")
     app.run(host='0.0.0.0', port=8080)
