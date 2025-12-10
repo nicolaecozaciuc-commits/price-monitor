@@ -97,6 +97,31 @@ def extract_price_from_page(page):
     
     return 0
 
+def extract_prices_from_text(text):
+    """Extrage toate prețurile dintr-un text"""
+    prices = []
+    
+    # Pattern-uri multiple
+    patterns = [
+        r'([\d.,]+)\s*Lei',           # 828,57 Lei
+        r'([\d.,]+)\s*lei',           # 828,57 lei
+        r'([\d.,]+)\s*RON',           # 828.57 RON
+        r'([\d.,]+)\s*ron',           # 828.57 ron
+        r'Lei\s*([\d.,]+)',           # Lei 828,57
+        r'RON\s*([\d.,]+)',           # RON 828.57
+        r'Pret[:\s]*([\d.,]+)',       # Pret: 828,57
+        r'price[:\s]*([\d.,]+)',      # price: 828.57
+    ]
+    
+    for pattern in patterns:
+        matches = re.findall(pattern, text, re.IGNORECASE)
+        for m in matches:
+            p = clean_price(m)
+            if p > 0 and p not in prices:
+                prices.append(p)
+    
+    return prices[:10]
+
 def get_domains_from_bing(page):
     domains = []
     try:
@@ -126,14 +151,14 @@ def find_price_on_search_page(page, domain, sku, save_debug=False):
     try:
         url = search_url.format(quote_plus(sku))
         page.goto(url, timeout=15000, wait_until='domcontentloaded')
-        time.sleep(4)  # Mai mult timp
+        time.sleep(4)
         
-        # Scroll pentru a încărca conținut lazy
+        # Scroll
         page.evaluate("window.scrollTo(0, 500)")
         time.sleep(1)
         
-        # Salvează debug ÎNTOTDEAUNA pentru absulo
-        if save_debug or 'absulo' in domain:
+        # Salvează debug
+        if save_debug:
             page.screenshot(path=f"{DEBUG_DIR}/{domain}_{sku}.png")
             with open(f"{DEBUG_DIR}/{domain}_{sku}.txt", 'w', encoding='utf-8') as f:
                 f.write(page.locator('body').inner_text())
@@ -142,32 +167,31 @@ def find_price_on_search_page(page, domain, sku, save_debug=False):
         body_lower = body_text.lower()
         body_norm = normalize(body_text)
         
-        # Debug
-        has_sku = sku_norm in body_norm or sku_lower in body_lower
+        # Check SKU
+        has_sku = sku_norm in body_norm or sku_lower in body_lower or sku_norm[1:] in body_norm
         logger.info(f"         SKU în pagină: {has_sku}")
         
-        # Verifică erori - mai permisiv
-        if '0 produse' in body_lower or 'niciun rezultat' in body_lower:
-            if 'produse)' not in body_lower:  # "(4 produse)" e OK
-                logger.info(f"         ⚠️ 0 produse")
-                return None
-        
-        if not has_sku:
-            # Poate SKU-ul e în altă formă
-            if sku[1:].lower() in body_lower:
-                has_sku = True
-                logger.info(f"         SKU parțial găsit: {sku[1:]}")
+        # Check erori
+        if '0 produse' in body_lower and 'produse)' not in body_lower:
+            logger.info(f"         ⚠️ 0 produse")
+            return None
         
         if not has_sku:
             return None
         
-        # Caută preț
-        price_matches = re.findall(r'([\d.,]+)\s*Lei', body_text)
-        for pm in price_matches[:10]:
-            price = clean_price(pm)
-            if price > 0:
-                logger.info(f"         💰 Preț: {price}")
-                return {'price': price, 'url': url}
+        # Extrage prețuri
+        prices = extract_prices_from_text(body_text)
+        logger.info(f"         💰 Prețuri găsite: {prices[:5]}")
+        
+        if prices:
+            # Returnează primul preț valid
+            return {'price': prices[0], 'url': url}
+        
+        # Încearcă JSON-LD de pe pagină
+        price = extract_price_from_page(page)
+        if price > 0:
+            logger.info(f"         💰 Preț JSON-LD: {price}")
+            return {'price': price, 'url': url}
         
         return None
         
@@ -184,7 +208,6 @@ def scan_product(sku, name, your_price=0):
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         
-        # Context mai "uman"
         context = browser.new_context(
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             viewport={'width': 1920, 'height': 1080},
@@ -224,10 +247,10 @@ def scan_product(sku, name, your_price=0):
             logger.info(f"   🌐 Site-uri: {domains[:8]}")
             
             # ETAPA 2: Verifică pe fiecare site
-            for domain in domains[:8]:
+            for i, domain in enumerate(domains[:8]):
                 logger.info(f"      🔗 {domain}...")
                 
-                save_debug = (len(found) == 0)
+                save_debug = (i < 2)  # Primele 2
                 result = find_price_on_search_page(page, domain, sku, save_debug)
                 
                 if result:
@@ -279,5 +302,5 @@ def get_debug(filename):
     return "Not found", 404
 
 if __name__ == '__main__':
-    logger.info("🚀 PriceMonitor v9.1 (Anti-Bot Headers) pe :8080")
+    logger.info("🚀 PriceMonitor v9.2 (Multi-Price Pattern) pe :8080")
     app.run(host='0.0.0.0', port=8080)
