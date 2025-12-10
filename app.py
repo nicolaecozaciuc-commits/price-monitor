@@ -35,22 +35,6 @@ SEARCH_URLS = {
     'dedeman.ro': 'https://www.dedeman.ro/ro/cautare?query={}',
 }
 
-# Selectori pentru cookie consent
-COOKIE_SELECTORS = [
-    'text=Permite toate',
-    'text=Accept toate',
-    'text=Acceptă toate',
-    'text=Accept all',
-    'text=Accept',
-    'text=Acceptă',
-    '#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll',
-    '.cc-accept',
-    '[data-action="accept"]',
-    'button:has-text("Accept")',
-    'button:has-text("Permite")',
-    'button:has-text("Acceptă")',
-]
-
 def clean_price(value):
     if not value: return 0
     text = re.sub(r'[^\d,.]', '', str(value))
@@ -72,17 +56,52 @@ def normalize(text):
     return re.sub(r'[^a-z0-9]', '', text.lower())
 
 def accept_cookies(page):
-    """Încearcă să accepte cookie-uri"""
-    for selector in COOKIE_SELECTORS:
+    """Încearcă să accepte cookie-uri - mai agresiv"""
+    
+    # Selectori specifici pentru site-uri românești
+    selectors = [
+        # Absulo specific
+        'button:has-text("Permite toate")',
+        'button:has-text("Permite")',
+        # Generic
+        'button:has-text("Accept")',
+        'button:has-text("Acceptă")',
+        'button:has-text("Accept all")',
+        'button:has-text("Accept toate")',
+        '#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll',
+        '.cc-accept',
+        '[data-action="accept"]',
+        'a:has-text("Permite toate")',
+        'a:has-text("Accept")',
+    ]
+    
+    for selector in selectors:
         try:
-            el = page.locator(selector).first
-            if el.is_visible(timeout=500):
-                el.click()
-                time.sleep(1)
-                logger.info(f"         🍪 Cookies acceptate")
+            btn = page.locator(selector).first
+            if btn.is_visible(timeout=1000):
+                btn.click(force=True)
+                logger.info(f"         🍪 Cookie click: {selector[:30]}")
+                time.sleep(1.5)
                 return True
         except:
             continue
+    
+    # Fallback: click pe orice buton vizibil cu text relevant
+    try:
+        buttons = page.locator('button').all()
+        for btn in buttons:
+            try:
+                text = btn.inner_text().lower()
+                if 'permite' in text or 'accept' in text:
+                    btn.click(force=True)
+                    logger.info(f"         🍪 Cookie fallback: {text[:20]}")
+                    time.sleep(1.5)
+                    return True
+            except:
+                continue
+    except:
+        pass
+    
     return False
 
 def extract_prices_from_text(text):
@@ -92,7 +111,6 @@ def extract_prices_from_text(text):
         r'([\d.,]+)\s*Lei',
         r'([\d.,]+)\s*lei',
         r'([\d.,]+)\s*RON',
-        r'([\d.,]+)\s*ron',
     ]
     
     for pattern in patterns:
@@ -135,8 +153,10 @@ def find_price_on_search_page(page, domain, sku, save_debug=False):
         page.goto(url, timeout=15000, wait_until='domcontentloaded')
         time.sleep(2)
         
-        # ACCEPT COOKIES
+        # ACCEPT COOKIES - încearcă de 2 ori
         accept_cookies(page)
+        time.sleep(1)
+        accept_cookies(page)  # A doua încercare
         
         time.sleep(2)
         
@@ -154,20 +174,44 @@ def find_price_on_search_page(page, domain, sku, save_debug=False):
         body_lower = body_text.lower()
         body_norm = normalize(body_text)
         
-        # Check SKU
-        has_sku = sku_norm in body_norm or sku_lower in body_lower or sku_norm[1:] in body_norm
-        logger.info(f"         SKU în pagină: {has_sku}")
+        # Check erori - EXTINS
+        error_phrases = [
+            '0 produse', 
+            'niciun rezultat',
+            'nu s-au gasit',
+            'nu am gasit',
+            'nu a fost gasit',
+            'nothing found',
+            'no results',
+            'nu exista produse',
+        ]
+        for phrase in error_phrases:
+            if phrase in body_lower:
+                # Verifică să nu fie "(4 produse)"
+                if 'produse)' not in body_lower or '0 produse' in body_lower:
+                    logger.info(f"         ⚠️ {phrase}")
+                    return None
         
-        # Check erori
-        if '0 produse' in body_lower and 'produse)' not in body_lower:
-            logger.info(f"         ⚠️ 0 produse")
-            return None
+        # Check SKU - dar NU în zona de search/title
+        # Exclude primele linii care conțin searchul
+        lines = body_text.split('\n')
+        content_start = 0
+        for i, line in enumerate(lines[:10]):
+            if 'rezultate' in line.lower() or 'search' in line.lower():
+                content_start = i + 1
+                break
+        
+        content_text = '\n'.join(lines[content_start:])
+        content_norm = normalize(content_text)
+        
+        has_sku = sku_norm in content_norm or sku_lower in content_text.lower()
+        logger.info(f"         SKU în conținut: {has_sku}")
         
         if not has_sku:
             return None
         
-        # Extrage prețuri
-        prices = extract_prices_from_text(body_text)
+        # Extrage prețuri din conținut (nu din header)
+        prices = extract_prices_from_text(content_text)
         logger.info(f"         💰 Prețuri: {prices[:5]}")
         
         if prices:
@@ -193,9 +237,6 @@ def scan_product(sku, name, your_price=0):
             viewport={'width': 1920, 'height': 1080},
             locale='ro-RO',
             timezone_id='Europe/Bucharest',
-            extra_http_headers={
-                'Accept-Language': 'ro-RO,ro;q=0.9,en-US;q=0.8,en;q=0.7',
-            }
         )
         
         page = context.new_page()
@@ -229,7 +270,7 @@ def scan_product(sku, name, your_price=0):
             for i, domain in enumerate(domains[:8]):
                 logger.info(f"      🔗 {domain}...")
                 
-                save_debug = (i < 2)
+                save_debug = (i < 3)
                 result = find_price_on_search_page(page, domain, sku, save_debug)
                 
                 if result:
@@ -281,5 +322,5 @@ def get_debug(filename):
     return "Not found", 404
 
 if __name__ == '__main__':
-    logger.info("🚀 PriceMonitor v9.3 (Cookie Accept) pe :8080")
+    logger.info("🚀 PriceMonitor v9.4 (Better Cookie + Error Detection) pe :8080")
     app.run(host='0.0.0.0', port=8080)
