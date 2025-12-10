@@ -405,24 +405,17 @@ def scan_product(sku, name, your_price=0):
     # Calculează diff pentru fiecare rezultat
     for r in found:
         r['diff'] = round(((r['price'] - your_price) / your_price) * 100, 1) if your_price > 0 else 0
-        # Marchează dacă e suspect (în afara ±30%)
-        if your_price > 0:
-            r['suspect'] = not (-30 <= r['diff'] <= 30)
-        else:
-            r['suspect'] = False
     
-    # Sortare: prețuri valide primele, apoi suspecte
-    valid = [r for r in found if not r['suspect']]
-    suspect = [r for r in found if r['suspect']]
+    # FILTRU: păstrează doar rezultatele în intervalul ±30% față de prețul nostru
+    if your_price > 0:
+        before_filter = len(found)
+        found = [r for r in found if -30 <= r['diff'] <= 30]
+        filtered_count = before_filter - len(found)
+        if filtered_count > 0:
+            logger.info(f"   🔻 Filtrat {filtered_count} outliers (±30%)")
     
-    valid.sort(key=lambda x: x['price'])
-    suspect.sort(key=lambda x: x['price'])
-    
-    # Log câte sunt suspecte
-    if suspect:
-        logger.info(f"   ⚠️ {len(suspect)} prețuri suspecte (±30%)")
-    
-    return valid[:5] + suspect[:3]  # Max 5 valide + 3 suspecte
+    found.sort(key=lambda x: x['price'])
+    return found[:5]
 
 
 @app.route('/')
