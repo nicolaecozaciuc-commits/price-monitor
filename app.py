@@ -186,6 +186,74 @@ def google_stealth_search(page, query, sku_for_match=None):
         
         logger.info(f"   📸 Google: {len(results)} cu preț")
         
+        # ============ METODA 2: CĂUTARE PE BLOC (5-6 linii) ============
+        # Pentru site-urile ratate de metoda 1 (SKU pe altă linie decât domain)
+        logger.info(f"   🔍 Metoda 2: bloc...")
+        current_domain = None
+        domain_line = -1
+        
+        for i, line in enumerate(lines):
+            line_lower = line.lower()
+            
+            # Detectează domain .ro
+            domain_match = re.search(r'(?:https?://)?(?:www\.)?([a-z0-9-]+\.ro)', line_lower)
+            if domain_match:
+                d = domain_match.group(1)
+                if len(d) > 4 and not any(b in d for b in BLOCKED):
+                    current_domain = d
+                    domain_line = i
+            
+            # Dacă avem domain și suntem în range-ul de 6 linii
+            if current_domain and domain_line >= 0 and i <= domain_line + 6:
+                # Verifică dacă SKU apare în această linie
+                query_lower = query.lower()
+                if query_lower in line_lower:
+                    # Verifică să nu fie deja în rezultate
+                    if any(r['domain'] == current_domain for r in results):
+                        continue
+                    
+                    # Caută preț în blocul domain_line până la domain_line+6
+                    block_start = domain_line
+                    block_end = min(len(lines), domain_line + 7)
+                    block_text = ' '.join(lines[block_start:block_end])
+                    
+                    # Găsește prețuri CU contextul lor
+                    price_patterns = re.finditer(r'([\d.,]+)\s*(?:RON|Lei|lei)', block_text, re.IGNORECASE)
+                    
+                    valid_prices = []
+                    for pm in price_patterns:
+                        price_value = clean_price(pm.group(1))
+                        if price_value <= 0:
+                            continue
+                        
+                        # Verifică dacă e preț de transport
+                        start = max(0, pm.start() - 25)
+                        end = min(len(block_text), pm.end() + 15)
+                        price_context = block_text[start:end].lower()
+                        
+                        transport_words = ['delivery', 'transport', 'livrare', 'shipping', 'expediere']
+                        is_transport = any(tw in price_context for tw in transport_words)
+                        
+                        if not is_transport:
+                            valid_prices.append(price_value)
+                    
+                    if valid_prices:
+                        # Pentru produse scumpe, ia primul preț valid (nu min)
+                        # min() poate lua prețuri de alte produse din snippet
+                        price = valid_prices[0]
+                        results.append({
+                            'domain': current_domain,
+                            'price': price,
+                            'source': 'Google SERP (bloc)'
+                        })
+                        logger.info(f"      🔵 {current_domain}: {price} Lei (bloc)")
+                    
+                    # Reset domain după ce am procesat
+                    current_domain = None
+                    domain_line = -1
+        
+        logger.info(f"   📸 Total după bloc: {len(results)}")
+        
     except Exception as e:
         logger.info(f"   ⚠️ Google: {str(e)[:40]}")
     
@@ -437,5 +505,5 @@ def get_debug(filename):
     return "Not found", 404
 
 if __name__ == '__main__':
-    logger.info("🚀 PriceMonitor v10.1 (Transport Filter) pe :8080")
+    logger.info("🚀 PriceMonitor v10.2 (Bloc Search) pe :8080")
     app.run(host='0.0.0.0', port=8080)
