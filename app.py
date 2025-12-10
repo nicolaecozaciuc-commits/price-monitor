@@ -182,11 +182,9 @@ def extract_prices_from_text(text):
             prices.append(p)
     return prices[:10]
 
-# ============ METODA 3: EXTRACȚIE HTML STRUCTURAT ============
+# ============ METODA 3: EXTRACȚIE HTML STRUCTURAT (RAFINATĂ) ============
 def extract_from_google_html(page, sku):
-    """Extrage prețuri din structura HTML a paginii Google
-    SKIPEAZĂ site-urile din BLOCKED (cache invalid)
-    """
+    """Extrage prețuri din HTML - SKIPEAZĂ site-urile din BLOCKED"""
     results = []
     try:
         html_content = page.content()
@@ -237,6 +235,7 @@ def extract_from_google_html(page, sku):
                 continue
             
             if not domain or len(domain) < 5:
+                continue
             if price <= 0:
                 continue
             if any(r['domain'] == domain for r in results):
@@ -306,7 +305,7 @@ def google_stealth_search(page, query, sku_for_match=None, sku_name=None):
             if has_match and current_domain:
                 context = ' '.join(lines[max(0,i-2):min(len(lines),i+3)])
                 
-                # SPECIAL GERMANQUALITY (V10.8)
+                # SPECIAL GERMANQUALITY
                 if current_domain == 'germanquality.ro':
                     gq_price = extract_germanquality_price(context)
                     if gq_price and gq_price > 0:
@@ -404,7 +403,7 @@ def google_stealth_search(page, query, sku_for_match=None, sku_name=None):
                     current_domain = d
                     domain_line = i
             
-            # DIRECT GERMANQUALITY extraction în Metoda 2 (fără condiție SKU)
+            # DIRECT GERMANQUALITY extraction
             if current_domain and current_domain == 'germanquality.ro' and domain_line >= 0 and i <= domain_line + 6:
                 if not any(r['domain'] == current_domain for r in results):
                     block_start = domain_line
@@ -747,5 +746,5 @@ def get_debug(filename):
     return "Not found", 404
 
 if __name__ == '__main__':
-    logger.info("🚀 PriceMonitor v10.8 (Foglia+Bagno+GermanQuality+Neakaisa, compari.ro blocked) pe :8080")
+    logger.info("🚀 PriceMonitor v10.8 (Foglia+Bagno+GermanQuality+Neakaisa, Metoda 3 BLOCKED filtered) pe :8080")
     app.run(host='0.0.0.0', port=8080)
