@@ -71,7 +71,7 @@ def validate_dimensions(sku_name, snippet_text, threshold=0.7):
         'reason': f"Match {len(matches)}/{len(sku_dims_norm)}" if is_valid else f"Mismatch {len(matches)}/{len(sku_dims_norm)}"
     }
 
-BLOCKED = ['google', 'bing', 'microsoft', 'facebook', 'youtube', 'doarbai', 'termohabitat', 'wikipedia', 'amazon', 'ebay']
+BLOCKED = ['google', 'bing', 'microsoft', 'facebook', 'youtube', 'doarbai', 'termohabitat', 'wikipedia', 'amazon', 'ebay', 'compari.ro']
 
 SEARCH_URLS = {
     'emag.ro': 'https://www.emag.ro/search/{}',
@@ -164,19 +164,40 @@ def extract_foglia_price(text):
 # ============ EXTRACȚIE SPECIFICĂ NEAKAISA ============
 def extract_neakaisa_price(text):
     """
-    Neakaisa are format: PREȚ_VÂNZARE Lei. Transport gratuit la comenzile peste XXX Lei
-    Primul preț e cel de vânzare, "peste XXX Lei" e prag transport (NU preț!)
-    Exemplu: "825,00 Lei. Transport gratuit la comenzile peste 599 Lei"
+    Neakaisa: caută cel mai mare preț RON (prețul principal)
     """
-    # Eliminăm "peste XXX Lei" din text pentru a nu-l confunda cu prețul
-    text_clean = re.sub(r'peste\s*[\d.,]+\s*Lei', '', text, flags=re.IGNORECASE)
+    prices = []
+    matches = re.finditer(r'([\d.,]+)\s*(?:RON|Lei)', text, re.IGNORECASE)
     
-    # Pattern: primul preț Lei din text curățat
-    match = re.search(r'([\d.,]+)\s*Lei', text_clean, re.IGNORECASE)
-    if match:
+    for match in matches:
         price = clean_price(match.group(1))
         if price > 0:
-            return price
+            prices.append(price)
+    
+    # Returnează cel mai mare preț
+    if prices:
+        return max(prices)
+    
+    return None
+
+
+# ============ EXTRACȚIE SPECIFICĂ GERMANQUALITY ============
+def extract_germanquality_price(text):
+    """
+    Germanquality.ro: caută cel mai mare preț (prețul principal)
+    Format: PREȚ RON la început de linie/snippet
+    """
+    prices = []
+    matches = re.finditer(r'([\d.,]+)\s*(?:RON|Lei)', text, re.IGNORECASE)
+    
+    for match in matches:
+        price = clean_price(match.group(1))
+        if price > 0:
+            prices.append(price)
+    
+    # Returnează cel mai mare preț (prețul principal)
+    if prices:
+        return max(prices)
     
     return None
 
@@ -396,26 +417,6 @@ def google_stealth_search(page, query, sku_for_match=None, sku_name=None):
                             logger.info(f"      🟣 {current_domain}: {foglia_price} Lei (Foglia)")
                         continue
                 
-                # SPECIAL NEAKAISA: folosește metoda specifică
-                if current_domain == 'neakaisa.ro':
-                    neakaisa_price = extract_neakaisa_price(context)
-                    if neakaisa_price and neakaisa_price > 0:
-                        if not any(r['domain'] == current_domain for r in results):
-                            # V10.7: VALIDARE DIMENSIUNI
-                            if sku_name:
-                                dim_check = validate_dimensions(sku_name, context)
-                                if not dim_check['valid']:
-                                    logger.info(f"      🔴 {current_domain}: {neakaisa_price} Lei - REJECTED (dims: {dim_check['reason']})")
-                                    continue
-                            
-                            results.append({
-                                'domain': current_domain,
-                                'price': neakaisa_price,
-                                'source': 'Google SERP (Neakaisa)'
-                            })
-                            logger.info(f"      🟤 {current_domain}: {neakaisa_price} Lei (Neakaisa)")
-                        continue
-                
                 # SPECIAL BAGNO (V10.8): folosește metoda specifică
                 if current_domain == 'bagno.ro':
                     bagno_price = extract_bagno_price(context)
@@ -434,6 +435,46 @@ def google_stealth_search(page, query, sku_for_match=None, sku_name=None):
                                 'source': 'Google SERP (Bagno)'
                             })
                             logger.info(f"      🟡 {current_domain}: {bagno_price} Lei (Bagno)")
+                        continue
+                
+                # SPECIAL GERMANQUALITY (V10.8): folosește metoda specifică
+                if current_domain == 'germanquality.ro':
+                    gq_price = extract_germanquality_price(context)
+                    if gq_price and gq_price > 0:
+                        if not any(r['domain'] == current_domain for r in results):
+                            # V10.7: VALIDARE DIMENSIUNI
+                            if sku_name:
+                                dim_check = validate_dimensions(sku_name, context)
+                                if not dim_check['valid']:
+                                    logger.info(f"      🔴 {current_domain}: {gq_price} Lei - REJECTED (dims: {dim_check['reason']})")
+                                    continue
+                            
+                            results.append({
+                                'domain': current_domain,
+                                'price': gq_price,
+                                'source': 'Google SERP (GermanQuality)'
+                            })
+                            logger.info(f"      🟠 {current_domain}: {gq_price} Lei (GQ)")
+                        continue
+                
+                # SPECIAL NEAKAISA - updated (V10.8): uses max price
+                if current_domain == 'neakaisa.ro':
+                    neakaisa_price = extract_neakaisa_price(context)
+                    if neakaisa_price and neakaisa_price > 0:
+                        if not any(r['domain'] == current_domain for r in results):
+                            # V10.7: VALIDARE DIMENSIUNI
+                            if sku_name:
+                                dim_check = validate_dimensions(sku_name, context)
+                                if not dim_check['valid']:
+                                    logger.info(f"      🔴 {current_domain}: {neakaisa_price} Lei - REJECTED (dims: {dim_check['reason']})")
+                                    continue
+                            
+                            results.append({
+                                'domain': current_domain,
+                                'price': neakaisa_price,
+                                'source': 'Google SERP (Neakaisa)'
+                            })
+                            logger.info(f"      🟤 {current_domain}: {neakaisa_price} Lei (Neakaisa)")
                         continue
                 
                 # Găsește prețuri CU contextul lor (pentru a detecta transport)
@@ -532,29 +573,6 @@ def google_stealth_search(page, query, sku_for_match=None, sku_name=None):
                             domain_line = -1
                             continue
                     
-                    # SPECIAL NEAKAISA: folosește metoda specifică
-                    if current_domain == 'neakaisa.ro':
-                        neakaisa_price = extract_neakaisa_price(block_text)
-                        if neakaisa_price and neakaisa_price > 0:
-                            # V10.7: VALIDARE DIMENSIUNI
-                            if sku_name:
-                                dim_check = validate_dimensions(sku_name, block_text)
-                                if not dim_check['valid']:
-                                    logger.info(f"      🔴 {current_domain}: {neakaisa_price} Lei - REJECTED (dims: {dim_check['reason']})")
-                                    current_domain = None
-                                    domain_line = -1
-                                    continue
-                            
-                            results.append({
-                                'domain': current_domain,
-                                'price': neakaisa_price,
-                                'source': 'Google SERP (Neakaisa)'
-                            })
-                            logger.info(f"      🟤 {current_domain}: {neakaisa_price} Lei (Neakaisa)")
-                            current_domain = None
-                            domain_line = -1
-                            continue
-                    
                     # SPECIAL BAGNO (V10.8): folosește metoda specifică
                     if current_domain == 'bagno.ro':
                         bagno_price = extract_bagno_price(block_text)
@@ -574,6 +592,52 @@ def google_stealth_search(page, query, sku_for_match=None, sku_name=None):
                                 'source': 'Google SERP (Bagno)'
                             })
                             logger.info(f"      🟡 {current_domain}: {bagno_price} Lei (Bagno)")
+                            current_domain = None
+                            domain_line = -1
+                            continue
+                    
+                    # SPECIAL GERMANQUALITY (V10.8): folosește metoda specifică
+                    if current_domain == 'germanquality.ro':
+                        gq_price = extract_germanquality_price(block_text)
+                        if gq_price and gq_price > 0:
+                            # V10.7: VALIDARE DIMENSIUNI
+                            if sku_name:
+                                dim_check = validate_dimensions(sku_name, block_text)
+                                if not dim_check['valid']:
+                                    logger.info(f"      🔴 {current_domain}: {gq_price} Lei - REJECTED (dims: {dim_check['reason']})")
+                                    current_domain = None
+                                    domain_line = -1
+                                    continue
+                            
+                            results.append({
+                                'domain': current_domain,
+                                'price': gq_price,
+                                'source': 'Google SERP (GermanQuality)'
+                            })
+                            logger.info(f"      🟠 {current_domain}: {gq_price} Lei (GQ)")
+                            current_domain = None
+                            domain_line = -1
+                            continue
+                    
+                    # SPECIAL NEAKAISA - updated (V10.8): uses max price
+                    if current_domain == 'neakaisa.ro':
+                        neakaisa_price = extract_neakaisa_price(block_text)
+                        if neakaisa_price and neakaisa_price > 0:
+                            # V10.7: VALIDARE DIMENSIUNI
+                            if sku_name:
+                                dim_check = validate_dimensions(sku_name, block_text)
+                                if not dim_check['valid']:
+                                    logger.info(f"      🔴 {current_domain}: {neakaisa_price} Lei - REJECTED (dims: {dim_check['reason']})")
+                                    current_domain = None
+                                    domain_line = -1
+                                    continue
+                            
+                            results.append({
+                                'domain': current_domain,
+                                'price': neakaisa_price,
+                                'source': 'Google SERP (Neakaisa)'
+                            })
+                            logger.info(f"      🟤 {current_domain}: {neakaisa_price} Lei (Neakaisa)")
                             current_domain = None
                             domain_line = -1
                             continue
@@ -885,5 +949,5 @@ def get_debug(filename):
     return "Not found", 404
 
 if __name__ == '__main__':
-    logger.info("🚀 PriceMonitor v10.8 (Bagno Specific Extraction) pe :8080")
+    logger.info("🚀 PriceMonitor v10.8 (Foglia+Bagno+GermanQuality+Neakaisa, compari.ro blocked) pe :8080")
     app.run(host='0.0.0.0', port=8080)
