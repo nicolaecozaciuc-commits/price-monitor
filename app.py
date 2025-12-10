@@ -83,27 +83,142 @@ def extract_prices_from_text(text):
             prices.append(p)
     return prices[:10]
 
-def get_domains_from_bing(page):
-    domains = []
+
+# ============ GOOGLE STEALTH - PASUL 1 ============
+def google_stealth_search(page, sku):
+    """
+    Google caută în tăcere, face 'poză' la prima pagină.
+    Returnează lista de {domain, price} găsite în snippets.
+    """
+    results = []
+    query = f"{sku} pret RON"
+    url = f"https://www.google.com/search?q={quote_plus(query)}&hl=ro&gl=ro"
+    
+    try:
+        page.goto(url, timeout=15000, wait_until='domcontentloaded')
+        time.sleep(2)
+        
+        # Accept cookies Google
+        try:
+            page.click('button:has-text("Accept all")', timeout=2000)
+        except:
+            try:
+                page.click('button:has-text("Acceptă tot")', timeout=1000)
+            except:
+                pass
+        
+        time.sleep(1)
+        
+        # Salvează "poza"
+        page.screenshot(path=f"{DEBUG_DIR}/google_{sku}.png")
+        
+        # Extragem textul întregii pagini
+        body_text = page.locator('body').inner_text()
+        
+        # Salvează și textul
+        with open(f"{DEBUG_DIR}/google_{sku}.txt", 'w', encoding='utf-8') as f:
+            f.write(body_text)
+        
+        # Căutăm blocuri cu SKU și preț
+        lines = body_text.split('\n')
+        current_domain = None
+        
+        for i, line in enumerate(lines):
+            line_lower = line.lower()
+            
+            # Detectează domain .ro
+            domain_match = re.search(r'(?:https?://)?(?:www\.)?([a-z0-9-]+\.ro)', line_lower)
+            if domain_match:
+                d = domain_match.group(1)
+                if len(d) > 4 and not any(b in d for b in BLOCKED):
+                    current_domain = d
+            
+            # Dacă linia conține SKU
+            if sku.lower() in line_lower and current_domain:
+                # Caută preț în această linie sau în apropiere
+                context = ' '.join(lines[max(0,i-2):min(len(lines),i+3)])
+                price_match = re.search(r'([\d.,]+)\s*(?:RON|Lei|lei)', context)
+                
+                if price_match:
+                    price = clean_price(price_match.group(1))
+                    if price > 0:
+                        # Verifică să nu fie duplicat
+                        if not any(r['domain'] == current_domain for r in results):
+                            results.append({
+                                'domain': current_domain,
+                                'price': price,
+                                'source': 'Google SERP'
+                            })
+                            logger.info(f"      🟢 {current_domain}: {price} Lei")
+        
+        logger.info(f"   📸 Google: {len(results)} cu preț")
+        
+    except Exception as e:
+        logger.info(f"   ⚠️ Google: {str(e)[:40]}")
+    
+    return results
+
+
+# ============ BING FALLBACK - PASUL 2 ============
+def get_domains_from_bing(page, sku):
+    """Bing ca fallback - extrage domenii și prețuri"""
+    results = []
+    
     try:
         for block in page.locator('.b_algo').all()[:15]:
             try:
                 text = block.inner_text()
+                text_lower = text.lower()
+                
+                # Extrage domain
+                domain = None
                 for line in text.split('\n')[:3]:
                     match = re.search(r'(?:https?://)?(?:www\.)?([a-z0-9-]+\.ro)', line.lower())
                     if match:
                         d = match.group(1)
-                        if len(d) > 4 and d not in domains and not any(b in d for b in BLOCKED):
-                            domains.append(d)
+                        if len(d) > 4 and not any(b in d for b in BLOCKED):
+                            domain = d
                             break
+                
+                if not domain:
+                    continue
+                
+                # Verifică duplicat
+                if any(r['domain'] == domain for r in results):
+                    continue
+                
+                # Verifică dacă SKU apare
+                has_sku = sku.lower() in text_lower
+                
+                # Extrage preț
+                price = 0
+                price_match = re.search(r'([\d.,]+)\s*(?:RON|Lei|lei)', text)
+                if price_match:
+                    price = clean_price(price_match.group(1))
+                
+                results.append({
+                    'domain': domain,
+                    'price': price,
+                    'has_sku': has_sku,
+                    'source': 'Bing SERP'
+                })
+                
+                if price > 0 and has_sku:
+                    logger.info(f"      🔵 {domain}: {price} Lei")
+                elif has_sku:
+                    logger.info(f"      🔵 {domain}: (pe site)")
+                    
             except:
                 continue
     except:
         pass
-    return domains[:10]
+    
+    return results
 
+
+# ============ VIZITĂ SITE (doar dacă trebuie) ============
 def find_price_on_site(page, domain, sku, save_debug=False):
-    """Caută preț pe site"""
+    """Vizitează site-ul doar dacă nu avem preț din SERP"""
     
     search_url = SEARCH_URLS.get(domain, f'https://www.{domain}/search?q={{}}')
     sku_norm = normalize(sku)
@@ -114,7 +229,6 @@ def find_price_on_site(page, domain, sku, save_debug=False):
         page.goto(url, timeout=15000, wait_until='domcontentloaded')
         time.sleep(3)
         
-        # Accept cookies
         if accept_cookies(page):
             time.sleep(2)
             page.reload(wait_until='domcontentloaded')
@@ -125,8 +239,6 @@ def find_price_on_site(page, domain, sku, save_debug=False):
         
         if save_debug:
             page.screenshot(path=f"{DEBUG_DIR}/{domain}_{sku}.png")
-            with open(f"{DEBUG_DIR}/{domain}_{sku}.html", 'w', encoding='utf-8') as f:
-                f.write(page.content())
         
         body_text = page.locator('body').inner_text()
         body_lower = body_text.lower()
@@ -140,14 +252,10 @@ def find_price_on_site(page, domain, sku, save_debug=False):
         
         # Check SKU
         has_sku = sku_lower in body_lower or sku_norm in normalize(body_text)
-        logger.info(f"         SKU: {has_sku}")
-        
         if not has_sku:
             return None
         
         prices = extract_prices_from_text(body_text)
-        logger.info(f"         💰 {prices[:5]}")
-        
         if prices:
             return {'price': prices[0], 'url': url}
         
@@ -157,6 +265,7 @@ def find_price_on_site(page, domain, sku, save_debug=False):
         logger.info(f"         ❌ {str(e)[:30]}")
         return None
 
+
 def scan_product(sku, name, your_price=0):
     found = []
     sku = str(sku).strip()
@@ -164,14 +273,9 @@ def scan_product(sku, name, your_price=0):
     logger.info(f"🔎 {sku} - {name[:30]}...")
     
     with sync_playwright() as p:
-        # Stealth browser settings
         browser = p.chromium.launch(
             headless=True,
-            args=[
-                '--disable-blink-features=AutomationControlled',
-                '--no-sandbox',
-                '--disable-dev-shm-usage',
-            ]
+            args=['--disable-blink-features=AutomationControlled', '--no-sandbox']
         )
         
         context = browser.new_context(
@@ -179,65 +283,87 @@ def scan_product(sku, name, your_price=0):
             viewport={'width': 1920, 'height': 1080},
             locale='ro-RO',
             timezone_id='Europe/Bucharest',
-            java_script_enabled=True,
-            has_touch=False,
-            is_mobile=False,
-            device_scale_factor=1,
         )
         
-        # Remove webdriver flag
+        # Stealth
         context.add_init_script("""
-            Object.defineProperty(navigator, 'webdriver', {
-                get: () => undefined
-            });
+            Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
         """)
         
         page = context.new_page()
         
         try:
-            # Bing
-            query = f"{sku} pret"
-            url = f"https://www.bing.com/search?q={quote_plus(query)}"
+            # ========== PASUL 1: GOOGLE (în tăcere) ==========
+            logger.info(f"   🔍 Google caută...")
+            google_results = google_stealth_search(page, sku)
             
-            logger.info(f"   🔍 Bing: {query}")
-            
-            page.goto(url, timeout=20000, wait_until='domcontentloaded')
-            time.sleep(3)
-            
-            try:
-                page.click('#bnp_btn_accept', timeout=3000)
-            except:
-                pass
-            
-            domains = get_domains_from_bing(page)
-            
-            # Site-uri prioritare
-            priority = ['baterii-lux.ro', 'badehaus.ro', 'foglia.ro', 'bagno.ro', 'compari.ro']
-            for site in priority:
-                if site not in domains:
-                    domains.append(site)
-            
-            logger.info(f"   🌐 {domains[:8]}")
-            
-            for i, domain in enumerate(domains[:8]):
-                logger.info(f"      🔗 {domain}...")
-                
-                result = find_price_on_site(page, domain, sku, save_debug=(i<3))
-                
-                if result:
+            # Adaugă rezultatele cu preț direct
+            for r in google_results:
+                if r['price'] > 0:
                     found.append({
-                        'name': domain,
-                        'price': result['price'],
-                        'url': result['url'],
-                        'method': 'Verified'
+                        'name': r['domain'],
+                        'price': r['price'],
+                        'url': f"https://www.{r['domain']}",
+                        'method': 'Google SERP'
                     })
-                    logger.info(f"      ✅ {result['price']} Lei")
-                else:
-                    logger.info(f"      ⚪ negăsit")
+            
+            # ========== PASUL 2: BING (fallback) ==========
+            if len(found) < 3:
+                logger.info(f"   🔍 Bing completează...")
+                query = f"{sku} pret"
+                url = f"https://www.bing.com/search?q={quote_plus(query)}"
                 
-                time.sleep(0.5)
-                if len(found) >= 5:
-                    break
+                page.goto(url, timeout=20000, wait_until='domcontentloaded')
+                time.sleep(3)
+                
+                try:
+                    page.click('#bnp_btn_accept', timeout=3000)
+                except:
+                    pass
+                
+                page.screenshot(path=f"{DEBUG_DIR}/bing_{sku}.png")
+                
+                bing_results = get_domains_from_bing(page, sku)
+                
+                for r in bing_results:
+                    # Nu adăuga duplicate
+                    if any(f['name'] == r['domain'] for f in found):
+                        continue
+                    
+                    if r['price'] > 0 and r.get('has_sku'):
+                        found.append({
+                            'name': r['domain'],
+                            'price': r['price'],
+                            'url': f"https://www.{r['domain']}",
+                            'method': 'Bing SERP'
+                        })
+            
+            # ========== PASUL 3: VIZITĂ SITE (doar dacă nu avem preț) ==========
+            # Colectăm site-urile care au SKU dar nu au preț
+            sites_to_visit = []
+            
+            for r in google_results:
+                if r['price'] == 0 and r['domain'] not in [f['name'] for f in found]:
+                    sites_to_visit.append(r['domain'])
+            
+            if len(found) < 3 and sites_to_visit:
+                logger.info(f"   🌐 Verificăm {len(sites_to_visit)} site-uri...")
+                
+                for domain in sites_to_visit[:3]:
+                    logger.info(f"      🔗 {domain}...")
+                    result = find_price_on_site(page, domain, sku, save_debug=True)
+                    
+                    if result:
+                        found.append({
+                            'name': domain,
+                            'price': result['price'],
+                            'url': result['url'],
+                            'method': 'Site Visit'
+                        })
+                        logger.info(f"      ✅ {result['price']} Lei")
+                    
+                    if len(found) >= 5:
+                        break
             
             logger.info(f"   📊 Total: {len(found)}")
             
@@ -253,6 +379,7 @@ def scan_product(sku, name, your_price=0):
     
     found.sort(key=lambda x: x['price'])
     return found[:5]
+
 
 @app.route('/')
 def index():
@@ -273,5 +400,5 @@ def get_debug(filename):
     return "Not found", 404
 
 if __name__ == '__main__':
-    logger.info("🚀 PriceMonitor v9.6 (Stealth + More Sites) pe :8080")
+    logger.info("🚀 PriceMonitor v9.7 (Google→Bing→Site) pe :8080")
     app.run(host='0.0.0.0', port=8080)
