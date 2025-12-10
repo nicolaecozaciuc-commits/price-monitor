@@ -203,28 +203,6 @@ def extract_bagno_price(text):
     return None
 
 
-# ============ EXTRACȚIE SPECIFICĂ COMPARI (V10.9) ============
-def extract_compari_price(text):
-    """
-    Compari.ro: agregator de prețuri
-    Caută cel mai mic preț valid (prețul cel mai bun)
-    """
-    # Caută toate prețurile din text
-    prices = []
-    matches = re.finditer(r'([\d.,]+)\s*(?:RON|Lei)', text, re.IGNORECASE)
-    
-    for match in matches:
-        price = clean_price(match.group(1))
-        if price > 0:
-            prices.append(price)
-    
-    # Returnează cel mai mic preț (best deal pe compari)
-    if prices:
-        return min(prices)
-    
-    return None
-
-
 # ============ METODA 3: EXTRACȚIE HTML STRUCTURAT ============
 def extract_from_google_html(page, sku):
     """
@@ -458,26 +436,6 @@ def google_stealth_search(page, query, sku_for_match=None, sku_name=None):
                             logger.info(f"      🟡 {current_domain}: {bagno_price} Lei (Bagno)")
                         continue
                 
-                # SPECIAL COMPARI (V10.9): folosește metoda specifică
-                if current_domain == 'compari.ro':
-                    compari_price = extract_compari_price(context)
-                    if compari_price and compari_price > 0:
-                        if not any(r['domain'] == current_domain for r in results):
-                            # V10.7: VALIDARE DIMENSIUNI
-                            if sku_name:
-                                dim_check = validate_dimensions(sku_name, context)
-                                if not dim_check['valid']:
-                                    logger.info(f"      🔴 {current_domain}: {compari_price} Lei - REJECTED (dims: {dim_check['reason']})")
-                                    continue
-                            
-                            results.append({
-                                'domain': current_domain,
-                                'price': compari_price,
-                                'source': 'Google SERP (Compari)'
-                            })
-                            logger.info(f"      🟠 {current_domain}: {compari_price} Lei (Compari)")
-                        continue
-                
                 # Găsește prețuri CU contextul lor (pentru a detecta transport)
                 price_patterns = re.finditer(r'([\d.,]+)\s*(?:RON|Lei|lei)', context, re.IGNORECASE)
                 
@@ -616,29 +574,6 @@ def google_stealth_search(page, query, sku_for_match=None, sku_name=None):
                                 'source': 'Google SERP (Bagno)'
                             })
                             logger.info(f"      🟡 {current_domain}: {bagno_price} Lei (Bagno)")
-                            current_domain = None
-                            domain_line = -1
-                            continue
-                    
-                    # SPECIAL COMPARI (V10.9): folosește metoda specifică
-                    if current_domain == 'compari.ro':
-                        compari_price = extract_compari_price(block_text)
-                        if compari_price and compari_price > 0:
-                            # V10.7: VALIDARE DIMENSIUNI
-                            if sku_name:
-                                dim_check = validate_dimensions(sku_name, block_text)
-                                if not dim_check['valid']:
-                                    logger.info(f"      🔴 {current_domain}: {compari_price} Lei - REJECTED (dims: {dim_check['reason']})")
-                                    current_domain = None
-                                    domain_line = -1
-                                    continue
-                            
-                            results.append({
-                                'domain': current_domain,
-                                'price': compari_price,
-                                'source': 'Google SERP (Compari)'
-                            })
-                            logger.info(f"      🟠 {current_domain}: {compari_price} Lei (Compari)")
                             current_domain = None
                             domain_line = -1
                             continue
@@ -950,5 +885,5 @@ def get_debug(filename):
     return "Not found", 404
 
 if __name__ == '__main__':
-    logger.info("🚀 PriceMonitor v10.9 (Compari Specific Extraction) pe :8080")
+    logger.info("🚀 PriceMonitor v10.8 (Bagno Specific Extraction) pe :8080")
     app.run(host='0.0.0.0', port=8080)
