@@ -126,10 +126,14 @@ def find_price_on_search_page(page, domain, sku, save_debug=False):
     try:
         url = search_url.format(quote_plus(sku))
         page.goto(url, timeout=15000, wait_until='domcontentloaded')
-        time.sleep(3)  # Mai mult timp să se încarce
+        time.sleep(4)  # Mai mult timp
         
-        # Salvează debug
-        if save_debug:
+        # Scroll pentru a încărca conținut lazy
+        page.evaluate("window.scrollTo(0, 500)")
+        time.sleep(1)
+        
+        # Salvează debug ÎNTOTDEAUNA pentru absulo
+        if save_debug or 'absulo' in domain:
             page.screenshot(path=f"{DEBUG_DIR}/{domain}_{sku}.png")
             with open(f"{DEBUG_DIR}/{domain}_{sku}.txt", 'w', encoding='utf-8') as f:
                 f.write(page.locator('body').inner_text())
@@ -138,43 +142,31 @@ def find_price_on_search_page(page, domain, sku, save_debug=False):
         body_lower = body_text.lower()
         body_norm = normalize(body_text)
         
-        # Debug log
+        # Debug
         has_sku = sku_norm in body_norm or sku_lower in body_lower
         logger.info(f"         SKU în pagină: {has_sku}")
         
-        # Verifică erori
-        error_phrases = ['nu am gasit', 'nu a fost gasit', 'nothing found', '0 rezultate', '0 produse', 'niciun rezultat']
-        for phrase in error_phrases:
-            if phrase in body_lower:
-                logger.info(f"         ⚠️ Eroare: '{phrase}'")
+        # Verifică erori - mai permisiv
+        if '0 produse' in body_lower or 'niciun rezultat' in body_lower:
+            if 'produse)' not in body_lower:  # "(4 produse)" e OK
+                logger.info(f"         ⚠️ 0 produse")
                 return None
+        
+        if not has_sku:
+            # Poate SKU-ul e în altă formă
+            if sku[1:].lower() in body_lower:
+                has_sku = True
+                logger.info(f"         SKU parțial găsit: {sku[1:]}")
         
         if not has_sku:
             return None
         
-        # Caută preț aproape de SKU
-        # Metoda: găsește toate aparițiile SKU și caută preț în jur
-        for match in re.finditer(re.escape(sku_lower), body_lower):
-            pos = match.start()
-            # Extrage context ±200 caractere
-            start = max(0, pos - 200)
-            end = min(len(body_text), pos + 200)
-            context = body_text[start:end]
-            
-            # Caută preț în context
-            price_match = re.search(r'([\d.,]+)\s*Lei', context)
-            if price_match:
-                price = clean_price(price_match.group(1))
-                if price > 0:
-                    logger.info(f"         💰 Preț găsit: {price}")
-                    return {'price': price, 'url': url}
-        
-        # Metodă alternativă: primul preț de pe pagină dacă SKU există
+        # Caută preț
         price_matches = re.findall(r'([\d.,]+)\s*Lei', body_text)
-        for pm in price_matches[:5]:
+        for pm in price_matches[:10]:
             price = clean_price(pm)
             if price > 0:
-                logger.info(f"         💰 Primul preț: {price}")
+                logger.info(f"         💰 Preț: {price}")
                 return {'price': price, 'url': url}
         
         return None
@@ -191,10 +183,17 @@ def scan_product(sku, name, your_price=0):
     
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
+        
+        # Context mai "uman"
         context = browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/121.0.0.0 Safari/537.36",
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             viewport={'width': 1920, 'height': 1080},
-            locale='ro-RO'
+            locale='ro-RO',
+            timezone_id='Europe/Bucharest',
+            extra_http_headers={
+                'Accept-Language': 'ro-RO,ro;q=0.9,en-US;q=0.8,en;q=0.7',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            }
         )
         
         page = context.new_page()
@@ -218,7 +217,7 @@ def scan_product(sku, name, your_price=0):
             domains = get_domains_from_bing(page)
             
             # Adaugă site-uri importante
-            for important in ['germanquality.ro', 'sensodays.ro', 'absulo.ro', 'emag.ro']:
+            for important in ['germanquality.ro', 'sensodays.ro', 'absulo.ro']:
                 if important not in domains:
                     domains.append(important)
             
@@ -228,9 +227,7 @@ def scan_product(sku, name, your_price=0):
             for domain in domains[:8]:
                 logger.info(f"      🔗 {domain}...")
                 
-                # Salvează debug doar pentru primele 2 site-uri
-                save_debug = (len(found) == 0 and domains.index(domain) < 2)
-                
+                save_debug = (len(found) == 0)
                 result = find_price_on_search_page(page, domain, sku, save_debug)
                 
                 if result:
@@ -244,7 +241,7 @@ def scan_product(sku, name, your_price=0):
                 else:
                     logger.info(f"      ⚪ negăsit")
                 
-                time.sleep(0.3)
+                time.sleep(0.5)
                 if len(found) >= 5:
                     break
             
@@ -282,5 +279,5 @@ def get_debug(filename):
     return "Not found", 404
 
 if __name__ == '__main__':
-    logger.info("🚀 PriceMonitor v9.0 (Debug Mode) pe :8080")
+    logger.info("🚀 PriceMonitor v9.1 (Anti-Bot Headers) pe :8080")
     app.run(host='0.0.0.0', port=8080)
