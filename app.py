@@ -33,6 +33,8 @@ SEARCH_URLS = {
     'ideal-standard.ro': 'https://www.ideal-standard.ro/ro/search?text={}',
     'instalatiiaz.ro': 'https://www.instalatiiaz.ro/?s={}',
     'dedeman.ro': 'https://www.dedeman.ro/ro/cautare?query={}',
+    'baterii-lux.ro': 'https://www.baterii-lux.ro/cautare?controller=search&s={}',
+    'badehaus.ro': 'https://www.badehaus.ro/cautare?search={}',
 }
 
 def clean_price(value):
@@ -56,20 +58,17 @@ def normalize(text):
     return re.sub(r'[^a-z0-9]', '', text.lower())
 
 def accept_cookies(page):
-    """Încearcă să accepte cookie-uri"""
     selectors = [
         'button:has-text("Permite toate")',
         'button:has-text("Accept")',
         'button:has-text("Acceptă")',
         '#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll',
     ]
-    
     for selector in selectors:
         try:
             btn = page.locator(selector).first
             if btn.is_visible(timeout=1000):
                 btn.click(force=True)
-                logger.info(f"         🍪 Cookie: {selector[:30]}")
                 return True
         except:
             continue
@@ -103,8 +102,8 @@ def get_domains_from_bing(page):
         pass
     return domains[:10]
 
-def find_price_on_search_page(page, domain, sku, save_debug=False):
-    """Caută preț pe pagina de rezultate"""
+def find_price_on_site(page, domain, sku, save_debug=False):
+    """Caută preț pe site"""
     
     search_url = SEARCH_URLS.get(domain, f'https://www.{domain}/search?q={{}}')
     sku_norm = normalize(sku)
@@ -112,33 +111,28 @@ def find_price_on_search_page(page, domain, sku, save_debug=False):
     url = search_url.format(quote_plus(sku))
     
     try:
-        # Prima încărcare
         page.goto(url, timeout=15000, wait_until='domcontentloaded')
-        time.sleep(2)
+        time.sleep(3)
         
         # Accept cookies
-        cookie_accepted = accept_cookies(page)
-        
-        if cookie_accepted:
-            # RELOAD pagina după accept cookies!
-            time.sleep(1)
+        if accept_cookies(page):
+            time.sleep(2)
             page.reload(wait_until='domcontentloaded')
             time.sleep(3)
-            logger.info(f"         🔄 Reload după cookies")
         
-        # Scroll
         page.evaluate("window.scrollTo(0, 500)")
         time.sleep(1)
         
-        # Salvează debug
         if save_debug:
             page.screenshot(path=f"{DEBUG_DIR}/{domain}_{sku}.png")
+            with open(f"{DEBUG_DIR}/{domain}_{sku}.html", 'w', encoding='utf-8') as f:
+                f.write(page.content())
         
         body_text = page.locator('body').inner_text()
         body_lower = body_text.lower()
         
         # Check erori
-        error_phrases = ['0 produse', 'nu s-au gasit', 'nu am gasit', 'niciun rezultat']
+        error_phrases = ['0 produse', 'nu s-au gasit', 'nu am gasit', 'niciun rezultat', '0 rezultate']
         for phrase in error_phrases:
             if phrase in body_lower and 'produse)' not in body_lower:
                 logger.info(f"         ⚠️ {phrase}")
@@ -151,7 +145,6 @@ def find_price_on_search_page(page, domain, sku, save_debug=False):
         if not has_sku:
             return None
         
-        # Extrage prețuri
         prices = extract_prices_from_text(body_text)
         logger.info(f"         💰 {prices[:5]}")
         
@@ -171,19 +164,38 @@ def scan_product(sku, name, your_price=0):
     logger.info(f"🔎 {sku} - {name[:30]}...")
     
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
+        # Stealth browser settings
+        browser = p.chromium.launch(
+            headless=True,
+            args=[
+                '--disable-blink-features=AutomationControlled',
+                '--no-sandbox',
+                '--disable-dev-shm-usage',
+            ]
+        )
         
         context = browser.new_context(
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             viewport={'width': 1920, 'height': 1080},
             locale='ro-RO',
             timezone_id='Europe/Bucharest',
+            java_script_enabled=True,
+            has_touch=False,
+            is_mobile=False,
+            device_scale_factor=1,
         )
+        
+        # Remove webdriver flag
+        context.add_init_script("""
+            Object.defineProperty(navigator, 'webdriver', {
+                get: () => undefined
+            });
+        """)
         
         page = context.new_page()
         
         try:
-            # ETAPA 1: Bing
+            # Bing
             query = f"{sku} pret"
             url = f"https://www.bing.com/search?q={quote_plus(query)}"
             
@@ -199,17 +211,18 @@ def scan_product(sku, name, your_price=0):
             
             domains = get_domains_from_bing(page)
             
-            for important in ['absulo.ro', 'germanquality.ro', 'sensodays.ro']:
-                if important not in domains:
-                    domains.append(important)
+            # Site-uri prioritare
+            priority = ['baterii-lux.ro', 'badehaus.ro', 'foglia.ro', 'bagno.ro', 'compari.ro']
+            for site in priority:
+                if site not in domains:
+                    domains.append(site)
             
             logger.info(f"   🌐 {domains[:8]}")
             
-            # ETAPA 2: Verifică
             for i, domain in enumerate(domains[:8]):
                 logger.info(f"      🔗 {domain}...")
                 
-                result = find_price_on_search_page(page, domain, sku, save_debug=(i<3))
+                result = find_price_on_site(page, domain, sku, save_debug=(i<3))
                 
                 if result:
                     found.append({
@@ -260,5 +273,5 @@ def get_debug(filename):
     return "Not found", 404
 
 if __name__ == '__main__':
-    logger.info("🚀 PriceMonitor v9.5 (Reload After Cookies) pe :8080")
+    logger.info("🚀 PriceMonitor v9.6 (Stealth + More Sites) pe :8080")
     app.run(host='0.0.0.0', port=8080)
