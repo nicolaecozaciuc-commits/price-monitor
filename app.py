@@ -109,6 +109,37 @@ def extract_foglia_price(text):
     return None
 
 
+# ============ EXTRACȚIE SPECIFICĂ NEAKAISA ============
+def extract_neakaisa_price(text):
+    """
+    Neakaisa are format: PREȚ_VÂNZARE Lei. PRP Lei
+    Primul preț e cel de vânzare, al doilea e PRP
+    Exemplu: "825,00 Lei. 1.549,00 Lei"
+    """
+    # Pattern: primul preț Lei urmat de . și alt preț Lei (PRP)
+    match = re.search(r'([\d.,]+)\s*Lei\.\s*[\d.,]+\s*Lei', text, re.IGNORECASE)
+    if match:
+        price = clean_price(match.group(1))
+        if price > 0:
+            return price
+    
+    # Pattern alternativ: preț Lei cu "prp" în apropiere
+    match = re.search(r'([\d.,]+)\s*Lei[^\.]*prp', text, re.IGNORECASE)
+    if match:
+        price = clean_price(match.group(1))
+        if price > 0:
+            return price
+    
+    # Pattern: preț urmat de "(din X recenzii)" - specific Neakaisa
+    match = re.search(r'([\d.,]+)\s*Lei[^\.]*\(din\s*\d+\s*recenzii\)', text, re.IGNORECASE)
+    if match:
+        price = clean_price(match.group(1))
+        if price > 0:
+            return price
+    
+    return None
+
+
 # ============ METODA 3: EXTRACȚIE HTML STRUCTURAT ============
 def extract_from_google_html(page, sku):
     """
@@ -294,6 +325,19 @@ def google_stealth_search(page, query, sku_for_match=None):
                             logger.info(f"      🟣 {current_domain}: {foglia_price} Lei (Foglia)")
                         continue
                 
+                # SPECIAL NEAKAISA: folosește metoda specifică
+                if current_domain == 'neakaisa.ro':
+                    neakaisa_price = extract_neakaisa_price(context)
+                    if neakaisa_price and neakaisa_price > 0:
+                        if not any(r['domain'] == current_domain for r in results):
+                            results.append({
+                                'domain': current_domain,
+                                'price': neakaisa_price,
+                                'source': 'Google SERP (Neakaisa)'
+                            })
+                            logger.info(f"      🟤 {current_domain}: {neakaisa_price} Lei (Neakaisa)")
+                        continue
+                
                 # Găsește prețuri CU contextul lor (pentru a detecta transport)
                 price_patterns = re.finditer(r'([\d.,]+)\s*(?:RON|Lei|lei)', context, re.IGNORECASE)
                 
@@ -369,6 +413,20 @@ def google_stealth_search(page, query, sku_for_match=None):
                                 'source': 'Google SERP (Foglia)'
                             })
                             logger.info(f"      🟣 {current_domain}: {foglia_price} Lei (Foglia)")
+                            current_domain = None
+                            domain_line = -1
+                            continue
+                    
+                    # SPECIAL NEAKAISA: folosește metoda specifică
+                    if current_domain == 'neakaisa.ro':
+                        neakaisa_price = extract_neakaisa_price(block_text)
+                        if neakaisa_price and neakaisa_price > 0:
+                            results.append({
+                                'domain': current_domain,
+                                'price': neakaisa_price,
+                                'source': 'Google SERP (Neakaisa)'
+                            })
+                            logger.info(f"      🟤 {current_domain}: {neakaisa_price} Lei (Neakaisa)")
                             current_domain = None
                             domain_line = -1
                             continue
@@ -670,5 +728,5 @@ def get_debug(filename):
     return "Not found", 404
 
 if __name__ == '__main__':
-    logger.info("🚀 PriceMonitor v10.4 (HTML Extract) pe :8080")
+    logger.info("🚀 PriceMonitor v10.5 (Neakaisa Extract) pe :8080")
     app.run(host='0.0.0.0', port=8080)
