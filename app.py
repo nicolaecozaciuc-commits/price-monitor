@@ -43,18 +43,20 @@ def is_valid_domain(domain):
     match = re.match(r'^([a-z0-9-]+)\.ro$', domain)
     return match and len(match.group(1)) >= 3
 
-def extract_from_bing(page):
+def extract_from_bing(page, sku):
     results = []
     
     try:
-        algo_count = len(page.locator('.b_algo').all())
-        logger.info(f"      .b_algo count: {algo_count}")
+        all_results = page.locator('.b_algo').all()
+        logger.info(f"      .b_algo count: {len(all_results)}")
         
-        for result in page.locator('.b_algo').all()[:15]:
+        for i, result in enumerate(all_results[:10]):
             try:
+                # URL
                 link = result.locator('a').first
                 href = link.get_attribute('href') or ''
                 
+                # Domain
                 domain_match = re.search(r'https?://(?:www\.)?([a-z0-9-]+\.ro)', href.lower())
                 if not domain_match:
                     continue
@@ -63,20 +65,40 @@ def extract_from_bing(page):
                 if not is_valid_domain(domain):
                     continue
                 
+                # Text complet din rezultat
                 text = result.inner_text()
-                price_match = re.search(r'([\d.,]+)\s*(?:RON|Lei|lei|Ron)', text)
-                if price_match:
-                    price = clean_price(price_match.group(1))
-                    if price > 0:
-                        results.append({
-                            'name': domain,
-                            'price': price,
-                            'url': href,
-                            'method': 'Bing'
-                        })
-                        logger.info(f"      ✓ {domain}: {price} Lei")
+                
+                # Debug: afișează textul primelor 3 rezultate
+                if i < 3:
+                    logger.info(f"      [{i}] {domain}: {text[:100]}...")
+                
+                # Caută preț - mai multe pattern-uri
+                price = 0
+                patterns = [
+                    r'([\d.]+,\d{2})\s*(?:RON|Lei)',  # 567,00 RON
+                    r'([\d,]+\.\d{2})\s*(?:RON|Lei)',  # 567.00 RON
+                    r'(\d+)\s*(?:RON|Lei)',            # 567 RON
+                    r'([\d.,]+)\s*(?:RON|Lei|lei|Ron)', # generic
+                ]
+                
+                for pattern in patterns:
+                    match = re.search(pattern, text, re.IGNORECASE)
+                    if match:
+                        price = clean_price(match.group(1))
+                        if price > 0:
+                            break
+                
+                if price > 0:
+                    results.append({
+                        'name': domain,
+                        'price': price,
+                        'url': href,
+                        'method': 'Bing'
+                    })
+                    logger.info(f"      ✓ {domain}: {price} Lei")
                         
-            except:
+            except Exception as e:
+                logger.debug(f"      Error parsing result: {e}")
                 continue
                 
     except Exception as e:
@@ -109,21 +131,19 @@ def scan_product(sku, name, your_price=0):
             page.goto(url, timeout=20000, wait_until='domcontentloaded')
             time.sleep(3)
             
-            # Screenshot pentru debug
-            screenshot_path = f"{DEBUG_DIR}/bing_{sku}.png"
-            page.screenshot(path=screenshot_path)
-            logger.info(f"   📸 Screenshot salvat: {screenshot_path}")
+            # Screenshot
+            page.screenshot(path=f"{DEBUG_DIR}/bing_{sku}.png")
             
             # Accept cookies
             try:
                 page.click('#bnp_btn_accept', timeout=2000)
                 time.sleep(1)
-                page.screenshot(path=f"{DEBUG_DIR}/bing_{sku}_after_cookies.png")
             except:
                 pass
             
-            found = extract_from_bing(page)
+            found = extract_from_bing(page, sku)
             
+            # Deduplicate
             seen = {}
             unique = []
             for r in found:
@@ -166,5 +186,5 @@ def get_debug(filename):
     return "Not found", 404
 
 if __name__ == '__main__':
-    logger.info("🚀 PriceMonitor v7.8 (Debug) pe :8080")
+    logger.info("🚀 PriceMonitor v7.9 (Debug Text) pe :8080")
     app.run(host='0.0.0.0', port=8080)
