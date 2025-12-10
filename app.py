@@ -2,30 +2,24 @@ import re
 import logging
 import time
 import random
-import os
-from datetime import datetime
-from flask import Flask, request, jsonify, render_template, send_from_directory
+from flask import Flask, request, jsonify, render_template
 from flask_cors import CORS
 from playwright.sync_api import sync_playwright
 
 # --- CONFIGURARE ---
-app = Flask(__name__, template_folder='templates', static_folder='static')
+app = Flask(__name__, template_folder='templates')
 CORS(app)
 
 # Configurare Logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s', datefmt='%H:%M:%S')
 logger = logging.getLogger('PriceMonitor')
 
-# Folder pentru dovezi (Screenshots)
-DEBUG_FOLDER = os.path.join(os.getcwd(), 'static', 'debug')
-os.makedirs(DEBUG_FOLDER, exist_ok=True)
-
 # Setări Anti-Blocare
-MIN_DELAY = 10  # Secunde minim între request-uri
-MAX_DELAY = 15  # Secunde maxim
+MIN_DELAY = 10
+MAX_DELAY = 15
 MAX_RETRIES = 3
 
-# Configurare Selectori specifici (pentru acuratețe maximă)
+# Configurare Selectori specifici
 SITE_SELECTORS = {
     'dedeman.ro': '.product-price',
     'emag.ro': '.product-new-price',
@@ -38,31 +32,15 @@ SITE_SELECTORS = {
     'neakaisa.ro': '.product-price'
 }
 
-def take_screenshot(page, name_prefix="debug"):
-    """Salvează un screenshot pentru debug"""
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"{name_prefix}_{timestamp}.png"
-    filepath = os.path.join(DEBUG_FOLDER, filename)
-    try:
-        page.screenshot(path=filepath)
-        logger.info(f"📸 Screenshot salvat: {filename}")
-        return f"/static/debug/{filename}"
-    except Exception as e:
-        logger.error(f"Nu am putut face screenshot: {e}")
-        return None
-
 def human_delay(min_s=2, max_s=5):
-    """Pauză aleatorie pentru a simula comportament uman"""
     sleep_time = random.uniform(min_s, max_s)
     logger.info(f"💤 Aștept {sleep_time:.1f} secunde...")
     time.sleep(sleep_time)
 
 def extract_price_from_page(page, url):
-    """Extrage prețul direct din pagina produsului"""
     domain = url.split('/')[2].replace('www.', '')
     price = 0
     
-    # 1. Încercare Selector Specific (Acuratețe 100%)
     for site, selector in SITE_SELECTORS.items():
         if site in domain:
             try:
@@ -72,17 +50,14 @@ def extract_price_from_page(page, url):
                     if price > 0: return price
             except: pass
 
-    # 2. Încercare Generic (Fallback)
     try:
-        # Căutăm elemente care conțin prețuri vizibile
-        body_text = page.inner_text('body')[:5000] # Analizăm partea de sus a paginii
+        body_text = page.inner_text('body')[:5000]
         matches = re.findall(r'(\d[\d\.,]*)\s*(?:lei|ron)', body_text, re.IGNORECASE)
         if matches:
-            # Luăm cel mai mare număr care pare a fi un preț (evităm rate lunare mici)
             candidates = [clean_price(m) for m in matches]
-            candidates = [c for c in candidates if c > 10] # Ignorăm prețuri gen 0.50 lei
+            candidates = [c for c in candidates if c > 10]
             if candidates:
-                price = candidates[0] # De obicei primul preț mare e cel al produsului
+                price = candidates[0]
     except: pass
     
     return price
@@ -97,12 +72,7 @@ def clean_price(text):
     except: return 0
 
 def search_google_discovery(query):
-    """
-    Faza 1: Descoperire link-uri pe Google
-    Returnează: Lista de URL-uri relevante
-    """
     links = []
-    screenshot_url = None
     
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
@@ -113,59 +83,50 @@ def search_google_discovery(query):
         page = context.new_page()
         
         try:
-            logger.info(f"🕵️‍♂️ [Google] Caut: {query}")
-            human_delay(MIN_DELAY, MAX_DELAY) # Delay inițial mare
+            logger.info(f"🕵️ [Google] Caut: {query}")
+            human_delay(MIN_DELAY, MAX_DELAY)
             
             page.goto(f"https://www.google.com/search?q={query}", timeout=30000)
             
-            # Verificare Blocaj/Captcha
             if "consent" in page.url or "sorry" in page.url:
                 logger.warning("⚠️ Posibil blocaj Google sau Consent Screen.")
-                screenshot_url = take_screenshot(page, "google_block")
                 try:
                     page.click('button:has-text("Accept")', timeout=2000)
                     page.click('div:has-text("Acceptă tot")', timeout=2000)
                     human_delay(2, 4)
                 except: pass
 
-            page.wait_for_selector('#search', timeout=10000)
+            page.wait_for_selector('#search', timeout=15000)
             
-            # Extragere link-uri organice
             results = page.query_selector_all('.g a')
             for res in results:
                 link = res.get_attribute('href')
                 if link and ".ro" in link and "google" not in link:
-                    # Filtrare simplă duplicate
                     if link not in links:
                         links.append(link)
                         
-            # Limităm la primele 5 rezultate relevante pentru a nu dura o veșnicie
             links = links[:5]
-            logger.info(f"✅ [Google] Am găsit {len(links)} link-uri potențiale.")
+            logger.info(f"✅ [Google] Am găsit {len(links)} link-uri.")
 
         except Exception as e:
-            logger.error(f"❌ Eroare Google Discovery: {e}")
-            screenshot_url = take_screenshot(page, "google_error")
+            logger.error(f"❌ Eroare Google: {e}")
         
         browser.close()
         
-    return links, screenshot_url
+    return links
 
 def analyze_competitor_page(url):
-    """
-    Faza 2: Vizitare și Extragere Preț Exact
-    """
     data = None
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
-        page = browser.new_page(user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36")
+        page = browser.new_page(user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
         
         try:
             domain = url.split('/')[2].replace('www.', '').split('.')[0].capitalize()
-            logger.info(f"   🚀 Vizitez: {domain} ({url})")
+            logger.info(f"   🚀 Vizitez: {domain}")
             
             page.goto(url, timeout=20000, wait_until='domcontentloaded')
-            human_delay(1, 3) # Mică pauză să se încarce prețurile dinamice
+            human_delay(1, 3)
             
             price = extract_price_from_page(page, url)
             
@@ -176,12 +137,12 @@ def analyze_competitor_page(url):
                     "price": price,
                     "url": url
                 }
-                logger.info(f"      💰 Preț găsit: {price} Lei")
+                logger.info(f"      💰 Preț: {price} Lei")
             else:
                 logger.warning(f"      ⚠️ Preț negăsit pe {domain}")
                 
         except Exception as e:
-            logger.error(f"   ❌ Eroare vizitare {url}: {e}")
+            logger.error(f"   ❌ Eroare: {e}")
             
         browser.close()
     return data
@@ -198,17 +159,15 @@ def api_check():
     
     query = f"{sku} {name} pret".strip()
     
-    # Pas 1: Descoperire Link-uri
-    links, debug_img = search_google_discovery(query)
+    links = search_google_discovery(query)
     
-    if not links and debug_img:
+    if not links:
         return jsonify({
             "status": "error",
-            "message": "Google a blocat căutarea sau nu a găsit rezultate.",
-            "debug_image": debug_img
+            "message": "Nu am găsit rezultate.",
+            "competitors": []
         })
 
-    # Pas 2: Vizitare Fiecare Link (Scraping Real)
     competitors = []
     for link in links:
         comp_data = analyze_competitor_page(link)
@@ -222,11 +181,6 @@ def api_check():
         "sku": sku,
         "competitors": competitors
     })
-
-# Servire fișiere statice (imagini debug)
-@app.route('/static/debug/<path:filename>')
-def serve_debug(filename):
-    return send_from_directory(DEBUG_FOLDER, filename)
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=8080)
