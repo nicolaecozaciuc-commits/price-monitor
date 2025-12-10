@@ -35,6 +35,22 @@ SEARCH_URLS = {
     'dedeman.ro': 'https://www.dedeman.ro/ro/cautare?query={}',
 }
 
+# Selectori pentru cookie consent
+COOKIE_SELECTORS = [
+    'text=Permite toate',
+    'text=Accept toate',
+    'text=Acceptă toate',
+    'text=Accept all',
+    'text=Accept',
+    'text=Acceptă',
+    '#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll',
+    '.cc-accept',
+    '[data-action="accept"]',
+    'button:has-text("Accept")',
+    'button:has-text("Permite")',
+    'button:has-text("Acceptă")',
+]
+
 def clean_price(value):
     if not value: return 0
     text = re.sub(r'[^\d,.]', '', str(value))
@@ -55,62 +71,28 @@ def normalize(text):
     text = unicodedata.normalize('NFD', text).encode('ascii', 'ignore').decode()
     return re.sub(r'[^a-z0-9]', '', text.lower())
 
-def extract_price_from_page(page):
-    # JSON-LD
-    try:
-        for script in page.locator('script[type="application/ld+json"]').all()[:5]:
-            try:
-                data = json.loads(script.inner_text())
-                items = data if isinstance(data, list) else [data]
-                for item in items:
-                    if item.get('@type') == 'Product':
-                        offers = item.get('offers', {})
-                        if isinstance(offers, list):
-                            offers = offers[0] if offers else {}
-                        price = offers.get('price') or offers.get('lowPrice')
-                        if price:
-                            p = clean_price(price)
-                            if p > 0:
-                                return p
-            except:
-                continue
-    except:
-        pass
-    
-    # META
-    try:
-        p = clean_price(page.locator('meta[property="product:price:amount"]').first.get_attribute('content'))
-        if p > 0:
-            return p
-    except:
-        pass
-    
-    # CSS
-    for sel in ['[data-price-amount]', '.price-new', '.special-price .price', '.product-price', '.price']:
+def accept_cookies(page):
+    """Încearcă să accepte cookie-uri"""
+    for selector in COOKIE_SELECTORS:
         try:
-            el = page.locator(sel).first
-            p = clean_price(el.get_attribute('data-price-amount') or el.inner_text())
-            if p > 0:
-                return p
+            el = page.locator(selector).first
+            if el.is_visible(timeout=500):
+                el.click()
+                time.sleep(1)
+                logger.info(f"         🍪 Cookies acceptate")
+                return True
         except:
-            pass
-    
-    return 0
+            continue
+    return False
 
 def extract_prices_from_text(text):
     """Extrage toate prețurile dintr-un text"""
     prices = []
-    
-    # Pattern-uri multiple
     patterns = [
-        r'([\d.,]+)\s*Lei',           # 828,57 Lei
-        r'([\d.,]+)\s*lei',           # 828,57 lei
-        r'([\d.,]+)\s*RON',           # 828.57 RON
-        r'([\d.,]+)\s*ron',           # 828.57 ron
-        r'Lei\s*([\d.,]+)',           # Lei 828,57
-        r'RON\s*([\d.,]+)',           # RON 828.57
-        r'Pret[:\s]*([\d.,]+)',       # Pret: 828,57
-        r'price[:\s]*([\d.,]+)',      # price: 828.57
+        r'([\d.,]+)\s*Lei',
+        r'([\d.,]+)\s*lei',
+        r'([\d.,]+)\s*RON',
+        r'([\d.,]+)\s*ron',
     ]
     
     for pattern in patterns:
@@ -151,7 +133,12 @@ def find_price_on_search_page(page, domain, sku, save_debug=False):
     try:
         url = search_url.format(quote_plus(sku))
         page.goto(url, timeout=15000, wait_until='domcontentloaded')
-        time.sleep(4)
+        time.sleep(2)
+        
+        # ACCEPT COOKIES
+        accept_cookies(page)
+        
+        time.sleep(2)
         
         # Scroll
         page.evaluate("window.scrollTo(0, 500)")
@@ -181,17 +168,10 @@ def find_price_on_search_page(page, domain, sku, save_debug=False):
         
         # Extrage prețuri
         prices = extract_prices_from_text(body_text)
-        logger.info(f"         💰 Prețuri găsite: {prices[:5]}")
+        logger.info(f"         💰 Prețuri: {prices[:5]}")
         
         if prices:
-            # Returnează primul preț valid
             return {'price': prices[0], 'url': url}
-        
-        # Încearcă JSON-LD de pe pagină
-        price = extract_price_from_page(page)
-        if price > 0:
-            logger.info(f"         💰 Preț JSON-LD: {price}")
-            return {'price': price, 'url': url}
         
         return None
         
@@ -215,7 +195,6 @@ def scan_product(sku, name, your_price=0):
             timezone_id='Europe/Bucharest',
             extra_http_headers={
                 'Accept-Language': 'ro-RO,ro;q=0.9,en-US;q=0.8,en;q=0.7',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
             }
         )
         
@@ -250,7 +229,7 @@ def scan_product(sku, name, your_price=0):
             for i, domain in enumerate(domains[:8]):
                 logger.info(f"      🔗 {domain}...")
                 
-                save_debug = (i < 2)  # Primele 2
+                save_debug = (i < 2)
                 result = find_price_on_search_page(page, domain, sku, save_debug)
                 
                 if result:
@@ -302,5 +281,5 @@ def get_debug(filename):
     return "Not found", 404
 
 if __name__ == '__main__':
-    logger.info("🚀 PriceMonitor v9.2 (Multi-Price Pattern) pe :8080")
+    logger.info("🚀 PriceMonitor v9.3 (Cookie Accept) pe :8080")
     app.run(host='0.0.0.0', port=8080)
