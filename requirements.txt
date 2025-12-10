@@ -2,3 +2,4 @@ flask
 flask-cors
 playwright
 beautifulsoup4
+lxml
