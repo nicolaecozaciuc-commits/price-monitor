@@ -181,6 +181,28 @@ def extract_neakaisa_price(text):
     return None
 
 
+# ============ EXTRACȚIE SPECIFICĂ BAGNO (V10.8) ============
+def extract_bagno_price(text):
+    """
+    Bagno.ro: caută cel mai mare preț (prețul principal, nu variante)
+    Format: PREȚ RON la început de linie/snippet
+    """
+    # Caută toate prețurile din text
+    prices = []
+    matches = re.finditer(r'([\d.,]+)\s*(?:RON|Lei)', text, re.IGNORECASE)
+    
+    for match in matches:
+        price = clean_price(match.group(1))
+        if price > 0:
+            prices.append(price)
+    
+    # Returnează cel mai mare preț (prețul principal)
+    if prices:
+        return max(prices)
+    
+    return None
+
+
 # ============ METODA 3: EXTRACȚIE HTML STRUCTURAT ============
 def extract_from_google_html(page, sku):
     """
@@ -394,6 +416,26 @@ def google_stealth_search(page, query, sku_for_match=None, sku_name=None):
                             logger.info(f"      🟤 {current_domain}: {neakaisa_price} Lei (Neakaisa)")
                         continue
                 
+                # SPECIAL BAGNO (V10.8): folosește metoda specifică
+                if current_domain == 'bagno.ro':
+                    bagno_price = extract_bagno_price(context)
+                    if bagno_price and bagno_price > 0:
+                        if not any(r['domain'] == current_domain for r in results):
+                            # V10.7: VALIDARE DIMENSIUNI
+                            if sku_name:
+                                dim_check = validate_dimensions(sku_name, context)
+                                if not dim_check['valid']:
+                                    logger.info(f"      🔴 {current_domain}: {bagno_price} Lei - REJECTED (dims: {dim_check['reason']})")
+                                    continue
+                            
+                            results.append({
+                                'domain': current_domain,
+                                'price': bagno_price,
+                                'source': 'Google SERP (Bagno)'
+                            })
+                            logger.info(f"      🟡 {current_domain}: {bagno_price} Lei (Bagno)")
+                        continue
+                
                 # Găsește prețuri CU contextul lor (pentru a detecta transport)
                 price_patterns = re.finditer(r'([\d.,]+)\s*(?:RON|Lei|lei)', context, re.IGNORECASE)
                 
@@ -509,6 +551,29 @@ def google_stealth_search(page, query, sku_for_match=None, sku_name=None):
                                 'source': 'Google SERP (Neakaisa)'
                             })
                             logger.info(f"      🟤 {current_domain}: {neakaisa_price} Lei (Neakaisa)")
+                            current_domain = None
+                            domain_line = -1
+                            continue
+                    
+                    # SPECIAL BAGNO (V10.8): folosește metoda specifică
+                    if current_domain == 'bagno.ro':
+                        bagno_price = extract_bagno_price(block_text)
+                        if bagno_price and bagno_price > 0:
+                            # V10.7: VALIDARE DIMENSIUNI
+                            if sku_name:
+                                dim_check = validate_dimensions(sku_name, block_text)
+                                if not dim_check['valid']:
+                                    logger.info(f"      🔴 {current_domain}: {bagno_price} Lei - REJECTED (dims: {dim_check['reason']})")
+                                    current_domain = None
+                                    domain_line = -1
+                                    continue
+                            
+                            results.append({
+                                'domain': current_domain,
+                                'price': bagno_price,
+                                'source': 'Google SERP (Bagno)'
+                            })
+                            logger.info(f"      🟡 {current_domain}: {bagno_price} Lei (Bagno)")
                             current_domain = None
                             domain_line = -1
                             continue
@@ -820,5 +885,5 @@ def get_debug(filename):
     return "Not found", 404
 
 if __name__ == '__main__':
-    logger.info("🚀 PriceMonitor v10.7 (Dimension Validation) pe :8080")
+    logger.info("🚀 PriceMonitor v10.8 (Bagno Specific Extraction) pe :8080")
     app.run(host='0.0.0.0', port=8080)
