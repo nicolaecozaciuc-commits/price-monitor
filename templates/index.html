@@ -2,7 +2,7 @@
 <html lang="ro">
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Price Monitor v13.4</title>
+<title>Price Monitor v14</title>
 <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -11,8 +11,6 @@
 body{background:#0f0f0f;color:#e0e0e0;font-family:sans-serif}
 .animate-pulse{animation:p 2s infinite}@keyframes p{0%,100%{opacity:1}50%{opacity:.5}}
 input[type="checkbox"] { accent-color: #2563eb; width: 18px; height: 18px; cursor: pointer; }
-.row-highlight { animation: highlight 2s ease-out; }
-@keyframes highlight { 0% { background-color: #1e3a8a; } 100% { background-color: transparent; } }
 </style>
 </head>
 <body><div id="root"></div><script type="text/babel">
@@ -28,7 +26,7 @@ const Dashboard = () => {
     const [lastRunDate, setLastRunDate] = useState(null);
     const stopSignal = useRef(false);
 
-    // CSV PARSER
+    // CSV Parser Robust (WooCommerce Fix)
     const parseCSV = (text) => {
         const rows = []; let cur = []; let cell = ''; let q = false;
         text.replace(/\r\n/g,'\n').replace(/\r/g,'\n').split('').forEach(c => {
@@ -48,36 +46,41 @@ const Dashboard = () => {
         return parseFloat(c.replace(/[^0-9.]/g, '')) || 0;
     };
 
+    // Normalizeaza header pentru a gasi coloane indiferent de diacritice
+    const normalize = (str) => {
+        if (!str) return "";
+        return str.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]/g, "");
+    };
+
     const handleUpload = (e) => {
         const reader = new FileReader();
         reader.onload = (evt) => {
             const rows = parseCSV(evt.target.result);
             if(rows.length < 2) return alert("CSV Invalid");
-            const h = rows[0].map(x => x.toLowerCase().replace(/[^a-z0-9]/g, ''));
             
-            let iSku = h.findIndex(x => x.includes('sku'));
-            let iName = h.findIndex(x => x.includes('nume'));
-            let iPrice = h.indexOf('pretnostru');
-            if(iPrice === -1) iPrice = h.findIndex(x => x.includes('pretobisnuit') || (x.includes('pret') && !x.includes('concurent')));
-            let iImg = h.findIndex(x => x.includes('imagini') || x.includes('images') || x.includes('poza'));
+            const headers = rows[0];
+            const normHeaders = headers.map(h => normalize(h));
+            
+            let iSku = normHeaders.findIndex(h => h.includes('sku'));
+            let iName = normHeaders.findIndex(h => h.includes('nume'));
+            
+            // Detectie Imagini
+            let iImg = normHeaders.findIndex(h => h.includes('imagini') || h.includes('images') || h.includes('poza'));
+            // Detectie Pret (Prioritate: Pret Nostru > Pret Obisnuit)
+            let iPrice = normHeaders.indexOf('pretnostru');
+            if(iPrice === -1) iPrice = normHeaders.findIndex(h => h.includes('pretobisnuit'));
+            if(iPrice === -1) iPrice = normHeaders.findIndex(h => (h.includes('pret') || h.includes('price')) && !h.includes('concurent'));
 
-            if(iSku === -1) return alert("Nu gasesc SKU");
+            if(iSku === -1) return alert("Nu gasesc coloana SKU in CSV");
             
             setProducts(rows.slice(1).map((r, k) => {
                 if(r.length <= iSku) return null;
                 let imgUrl = null;
                 if (iImg !== -1 && r[iImg]) imgUrl = r[iImg].split(',')[0].trim();
-                let finalPrice = iPrice !== -1 && r[iPrice] ? parsePrice(r[iPrice]) : 0;
+                let p = (iPrice !== -1 && r[iPrice]) ? parsePrice(r[iPrice]) : 0;
 
                 return {
-                    id: k, 
-                    sku: r[iSku], 
-                    name: r[iName]||'', 
-                    price: finalPrice, 
-                    image: imgUrl, 
-                    comps: [],
-                    lastCheck: null,
-                    status: 'pending' // pending, found, no_results
+                    id: k, sku: r[iSku], name: r[iName]||'', price: p, image: imgUrl, comps: []
                 };
             }).filter(x => x && x.sku));
         };
@@ -91,27 +94,17 @@ const Dashboard = () => {
             const res = await fetch('/api/check', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(p)});
             const d = await res.json();
             if(d.status === 'success') {
-                setProducts(prev => prev.map(x => {
-                    if (x.id === id) {
-                        return {
-                            ...x, 
-                            comps: d.competitors,
-                            lastCheck: new Date().toLocaleTimeString(),
-                            status: d.competitors.length > 0 ? 'found' : 'no_results'
-                        };
-                    }
-                    return x;
-                }));
+                setProducts(prev => prev.map(x => x.id === id ? {
+                    ...x, 
+                    comps: d.competitors,
+                    lastCheck: new Date().toLocaleTimeString()
+                } : x));
             }
         } catch(e) { console.error(e); }
         finally { setCheckingId(null); }
     };
 
-    const handleStop = () => { 
-        if(confirm("Oprești scanarea? Vom afișa rezultatele culese până acum.")) {
-            stopSignal.current = true; 
-        }
-    };
+    const handleStop = () => { if(confirm("Opresti scanarea?")) stopSignal.current = true; };
 
     const toggleSelect = (id) => {
         const newSel = new Set(selected);
@@ -124,47 +117,15 @@ const Dashboard = () => {
         else setSelected(new Set(products.map(p => p.id)));
     };
 
-    // Funcție pentru analiza finală (se apelează la Stop sau Finish)
-    const finalizeScan = () => {
-        setProgress(null); 
-        setAutoStart(false);
-        
-        // Calcul statistici
-        const scanned = products.filter(p => p.status === 'found' || p.status === 'no_results');
-        const problematic = scanned.filter(p => p.comps.some(c => c.price < p.price));
-        
-        if (scanned.length > 0) {
-            // Sortare automată: cele cu probleme (concurent mai ieftin) primele
-            const sorted = [...products].sort((a, b) => {
-                const aCheap = a.comps.some(c => c.price < a.price);
-                const bCheap = b.comps.some(c => c.price < b.price);
-                if (aCheap && !bCheap) return -1;
-                if (!aCheap && bCheap) return 1;
-                return 0;
-            });
-            setProducts(sorted);
-            alert(`🛑 Scanare Încheiată!\n\nProduse verificate: ${scanned.length}\nProduse unde ești mai scump: ${problematic.length}\n\nLista a fost reordonată pentru a arăta prioritățile.`);
-        } else {
-            alert("🛑 Scanare oprită.");
-        }
-    };
-
     const runScanQueue = (queueIds) => {
-        if(!queueIds.length) return alert("Nimic de scanat!");
+        if(!queueIds.length) return alert("Nimic selectat!");
         stopSignal.current = false;
         setProgress({cur:0, tot:queueIds.length});
         
         let i = 0;
         const next = () => {
-            if (stopSignal.current) { 
-                finalizeScan();
-                return; 
-            }
-            if(i >= queueIds.length) { 
-                alert("✅ Scanare completă!");
-                finalizeScan();
-                return; 
-            }
+            if (stopSignal.current) { setProgress(null); setAutoStart(false); alert("🛑 Oprit."); return; }
+            if(i >= queueIds.length) { setProgress(null); alert("✅ Finalizat!"); return; }
             
             setProgress({cur:i+1, tot:queueIds.length});
             check(queueIds[i]).then(() => { 
@@ -195,32 +156,40 @@ const Dashboard = () => {
         <div className="p-6 max-w-[95%] mx-auto">
             <div className="bg-[#1a1a1a] p-6 rounded-xl border border-[#333] mb-6 flex flex-wrap justify-between items-center gap-4">
                 <div>
-                    <h1 className="text-2xl font-bold text-white flex gap-2"><span>📊</span> PriceMonitor v13.4</h1>
-                    <p className="text-gray-500 text-sm">Sortare Automată la Stop • Imagini • Feedback</p>
+                    <h1 className="text-2xl font-bold text-white flex gap-2"><span>📊</span> PriceMonitor v14</h1>
+                    <p className="text-gray-500 text-sm">Direct Search • Fără Google • Selectie Manuală</p>
                 </div>
+                
                 <div className="flex items-center gap-3 bg-[#222] p-2 rounded-lg border border-[#444]">
                     <span className="text-gray-400 text-sm">⏰</span>
                     <input type="time" value={targetTime} onChange={(e) => setTargetTime(e.target.value)} className="bg-[#333] text-white px-2 py-1 rounded border border-[#555] text-sm" disabled={autoStart}/>
                     <button onClick={() => setAutoStart(!autoStart)} className={`px-3 py-1 rounded text-xs font-bold ${autoStart ? 'bg-green-600 text-white animate-pulse' : 'bg-gray-600 text-gray-300'}`}>{autoStart ? 'ON' : 'OFF'}</button>
                 </div>
+
                 <div className="flex gap-3">
                     {progress ? (
                         <div className="flex items-center gap-3">
                             <span className="text-blue-400 font-mono animate-pulse">Progres: {progress.cur}/{progress.tot}</span>
-                            <button onClick={handleStop} className="bg-red-600 px-6 py-2 rounded text-white font-bold hover:bg-red-700 border border-red-500">🛑 STOP & REZULTATE</button>
+                            <button onClick={handleStop} className="bg-red-600 px-6 py-2 rounded text-white font-bold hover:bg-red-700 border border-red-500">🛑 STOP</button>
                         </div>
                     ) : (
                         <div className="flex gap-3 items-center">
                             <label className="bg-[#333] px-4 py-2 rounded cursor-pointer hover:bg-[#444] text-white border border-[#555] text-sm font-bold">📂 CSV <input type="file" onChange={handleUpload} className="hidden"/></label>
+                            
                             {selected.size > 0 ? (
-                                <button onClick={runSelected} className="bg-green-600 px-4 py-2 rounded text-white font-bold hover:bg-green-700 shadow-lg border border-green-500 animate-pulse">✅ Scanează {selected.size} Selectate</button>
+                                <button onClick={runSelected} className="bg-green-600 px-4 py-2 rounded text-white font-bold hover:bg-green-700 shadow-lg border border-green-500 animate-pulse">
+                                    ✅ Scanează {selected.size} Selectate
+                                </button>
                             ) : (
-                                <button onClick={runAll} disabled={!products.length} className="bg-blue-600 px-4 py-2 rounded text-white font-bold hover:bg-blue-700 disabled:opacity-50 border border-blue-500">🚀 Scanează TOT</button>
+                                <button onClick={runAll} disabled={!products.length} className="bg-blue-600 px-4 py-2 rounded text-white font-bold hover:bg-blue-700 disabled:opacity-50 border border-blue-500">
+                                    🚀 Scanează TOT
+                                </button>
                             )}
                         </div>
                     )}
                 </div>
             </div>
+
             <div className="bg-[#1a1a1a] rounded-xl border border-[#333] overflow-hidden">
                 <table className="w-full text-left text-sm text-gray-300">
                     <thead className="bg-black text-gray-500 uppercase">
@@ -228,7 +197,7 @@ const Dashboard = () => {
                             <th className="p-4 w-12 text-center"><input type="checkbox" onChange={toggleAll} checked={products.length > 0 && selected.size === products.length} /></th>
                             <th className="p-4 w-1/4">Produs</th>
                             <th className="p-4 w-32">Prețul Tău</th>
-                            <th className="p-4">Concurență (Direct)</th>
+                            <th className="p-4">Rezultate Directe (Top 5)</th>
                             <th className="p-4 w-24">Acțiuni</th>
                         </tr>
                     </thead>
@@ -244,16 +213,16 @@ const Dashboard = () => {
                                         <div>
                                             <div className="font-bold text-white mb-1 text-sm">{p.name}</div>
                                             <div className="text-xs bg-[#333] px-2 py-1 rounded inline-block font-mono text-gray-400">{p.sku}</div>
-                                            {p.lastCheck && <div className="text-[10px] text-gray-500 mt-1">Verificat: {p.lastCheck}</div>}
+                                            {p.lastCheck && <div className="text-[10px] text-green-400 mt-1">Verificat: {p.lastCheck}</div>}
                                         </div>
                                     </div>
                                 </td>
-                                <td className="p-4 align-top text-xl font-bold text-gray-500">{p.price} Lei</td>
+                                <td className="p-4 align-top text-xl font-bold text-emerald-400">{p.price} Lei</td>
                                 <td className="p-4">
                                     {p.comps && p.comps.length > 0 ? (
                                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-2">
                                             {p.comps.map((c,k) => {
-                                                const isCheaper = c.price < p.price || p.price === 0; // Daca pretul nostru e 0, oricum e "mai ieftin" sau relevant
+                                                const isCheaper = c.price < p.price || p.price === 0;
                                                 return (
                                                     <div key={k} className={`p-2 rounded border ${isCheaper ? 'bg-red-900/20 border-red-800' : 'bg-green-900/20 border-green-800'} relative`}>
                                                         <div className="absolute -top-2 -right-2 bg-[#333] text-white text-[10px] w-5 h-5 flex items-center justify-center rounded-full border border-[#555]">{k+1}</div>
@@ -265,9 +234,7 @@ const Dashboard = () => {
                                             })}
                                         </div>
                                     ) : (
-                                        <span className={`text-xs italic ${p.status === 'no_results' ? 'text-red-500 font-bold' : 'text-gray-600'}`}>
-                                            {p.status === 'no_results' ? "Niciun rezultat găsit pe site-urile vizate." : "..."}
-                                        </span>
+                                        <span className="text-gray-600 italic text-xs">...</span>
                                     )}
                                 </td>
                                 <td className="p-4 align-top">
