@@ -70,14 +70,19 @@
                 const p = products.find(x => x.id === id);
                 if (!p) return;
                 setCheckingIds(prev => new Set(prev).add(id));
+                
                 try {
                     const res = await fetch('/api/check', {
                         method: 'POST', headers: {'Content-Type': 'application/json'},
                         body: JSON.stringify({ sku: p.sku, name: p.name })
                     });
                     const data = await res.json();
+                    
                     if (data.status === 'success') {
                         setProducts(prev => prev.map(prod => prod.id === id ? { ...prod, competitors: data.competitors } : prod));
+                    } else if (data.status === 'error') {
+                        // Log error silently or simple alert
+                        console.error("Eroare la scanare:", data.message);
                     }
                 } catch (e) { console.error(e); } 
                 finally {
@@ -88,12 +93,16 @@
 
             const handleBulk = () => {
                 if (products.length === 0) return alert("Încarcă CSV!");
-                if (confirm(`Verificarea va dura mai mult deoarece intrăm direct pe site-urile concurenților (Dedeman, eMAG, etc).\n\nContinui?`)) {
+                if (confirm(`ATENȚIE: Modul "Exactitate Maximă" este activ.\n\nFiecare produs va dura ~20-30 secunde pentru a evita blocajele.\n\nStart?`)) {
                     setBulkProgress({ current: 0, total: products.length });
                     let i = 0;
                     const next = () => {
                         if (i >= products.length) { setBulkProgress(null); return; }
-                        handleCheckPrice(products[i].id).then(() => { i++; setTimeout(next, 2000); });
+                        handleCheckPrice(products[i].id).then(() => { 
+                            i++; 
+                            // Delay suplimentar in frontend
+                            setTimeout(next, 5000); 
+                        });
                     };
                     next();
                 }
@@ -106,7 +115,6 @@
                 reader.onload = (evt) => {
                     const rows = parseCSV(evt.target.result);
                     if (rows.length < 2) return alert("CSV invalid");
-                    
                     const headers = rows[0];
                     const normHeaders = headers.map(h => normalize(h));
                     
@@ -141,28 +149,24 @@
                 const blob = new Blob([csv], { type: 'text/csv' });
                 const url = window.URL.createObjectURL(blob);
                 const a = document.createElement('a');
-                a.href = url; a.download = "rezultate_direct_scraping.csv"; a.click();
+                a.href = url; a.download = "rezultate_scraping_exact.csv"; a.click();
             };
 
             return (
                 <div className="min-h-screen bg-[#0f0f0f] text-gray-200 font-sans p-6">
-                    {/* Header Card */}
                     <div className="flex justify-between items-center mb-8 bg-[#1a1a1a] p-6 rounded-xl border border-[#2a2a2a] shadow-lg">
                         <div>
                             <div className="text-2xl font-bold text-white flex items-center gap-3">
                                 <span className="bg-gradient-to-r from-indigo-500 to-purple-600 text-transparent bg-clip-text">📊</span> 
-                                PriceMonitor v8
+                                PriceMonitor v9
                             </div>
-                            <div className="text-gray-500 text-sm mt-1">Direct Scraping (Dedeman, eMAG, Leroy, Hornbach)</div>
+                            <div className="text-gray-500 text-sm mt-1">Mod: Exactitate Maximă & Anti-Blocare</div>
                         </div>
                         <div className="flex gap-3 items-center">
                             {bulkProgress && (
                                 <div className="bg-blue-900/30 text-blue-300 px-4 py-2 rounded-lg border border-blue-500/30 flex items-center gap-2 animate-pulse">
                                     <div className="text-xl">⚙️</div>
-                                    <div>
-                                        <div className="text-xs font-bold uppercase">Progres</div>
-                                        <div className="font-mono">{bulkProgress.current} / {bulkProgress.total}</div>
-                                    </div>
+                                    <div><div className="text-xs font-bold uppercase">Progres</div><div className="font-mono">{bulkProgress.current} / {bulkProgress.total}</div></div>
                                 </div>
                             )}
                             <button onClick={handleBulk} disabled={!!bulkProgress} className="bg-gradient-to-r from-indigo-600 to-purple-600 px-6 py-3 rounded-lg text-white font-bold hover:from-indigo-700 hover:to-purple-700 transition shadow-lg shadow-indigo-500/30 disabled:opacity-50 disabled:cursor-not-allowed">
