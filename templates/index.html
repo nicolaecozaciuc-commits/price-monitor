@@ -2,7 +2,7 @@
 <html lang="ro">
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Price Monitor v10 - Top 5</title>
+<title>Price Monitor v13</title>
 <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -10,15 +10,21 @@
 <style>
 body{background:#0f0f0f;color:#e0e0e0;font-family:sans-serif}
 .animate-pulse{animation:p 2s infinite}@keyframes p{0%,100%{opacity:1}50%{opacity:.5}}
+input[type="checkbox"] { accent-color: #2563eb; width: 18px; height: 18px; cursor: pointer; }
 </style>
 </head>
 <body><div id="root"></div><script type="text/babel">
-const {useState} = React;
+const {useState, useEffect, useRef} = React;
 
 const Dashboard = () => {
     const [products, setProducts] = useState([]);
+    const [selected, setSelected] = useState(new Set()); 
     const [checkingId, setCheckingId] = useState(null);
     const [progress, setProgress] = useState(null);
+    const [targetTime, setTargetTime] = useState("02:00");
+    const [autoStart, setAutoStart] = useState(false);
+    const [lastRunDate, setLastRunDate] = useState(null);
+    const stopSignal = useRef(false);
 
     const parseCSV = (text) => {
         const rows = []; let cur = []; let cell = ''; let q = false;
@@ -31,24 +37,38 @@ const Dashboard = () => {
         return rows;
     };
 
+    const parsePrice = (p) => {
+        if (!p) return 0;
+        let c = String(p).trim();
+        if (c.includes(',') && c.indexOf(',') > c.lastIndexOf('.')) c = c.replace(/\./g, '').replace(',', '.');
+        else if (c.includes(',')) c = c.replace(',', '.');
+        return parseFloat(c.replace(/[^0-9.]/g, '')) || 0;
+    };
+
     const handleUpload = (e) => {
         const reader = new FileReader();
         reader.onload = (evt) => {
             const rows = parseCSV(evt.target.result);
             if(rows.length < 2) return alert("CSV Invalid");
             const h = rows[0].map(x => x.toLowerCase().replace(/[^a-z0-9]/g, ''));
-            
             let iSku = h.findIndex(x => x.includes('sku'));
             let iName = h.findIndex(x => x.includes('nume'));
             let iPrice = h.indexOf('pretnostru');
             if(iPrice === -1) iPrice = h.findIndex(x => x.includes('pretobisnuit') || (x.includes('pret') && !x.includes('concurent')));
             
+            // Detectie Imagini
+            let iImg = h.findIndex(x => x.includes('imagini') || x.includes('images') || x.includes('poza'));
+
             if(iSku === -1) return alert("Nu gasesc SKU");
             
             setProducts(rows.slice(1).map((r, k) => {
                 if(r.length <= iSku) return null;
-                let p = r[iPrice] ? parseFloat(r[iPrice].replace(/\./g,'').replace(',','.')) : 0;
-                return {id: k, sku: r[iSku], name: r[iName]||'', price: p, comps: []};
+                let imgUrl = null;
+                if (iImg !== -1 && r[iImg]) imgUrl = r[iImg].split(',')[0].trim();
+
+                return {
+                    id: k, sku: r[iSku], name: r[iName]||'', price: parsePrice(r[iPrice]), image: imgUrl, comps: []
+                };
             }).filter(x => x && x.sku));
         };
         reader.readAsText(e.target.files[0]);
@@ -65,69 +85,108 @@ const Dashboard = () => {
         finally { setCheckingId(null); }
     };
 
-    const runBulk = () => {
-        if(!products.length) return alert("Incarca CSV!");
-        if(!confirm("Start scanare TOP 5? (Dureaza ~30s per produs)")) return;
-        setProgress({cur:0, tot:products.length});
+    const handleStop = () => { if(confirm("Opresti scanarea?")) stopSignal.current = true; };
+
+    const toggleSelect = (id) => {
+        const newSel = new Set(selected);
+        if(newSel.has(id)) newSel.delete(id); else newSel.add(id);
+        setSelected(newSel);
+    };
+
+    const toggleAll = () => {
+        if(selected.size === products.length) setSelected(new Set());
+        else setSelected(new Set(products.map(p => p.id)));
+    };
+
+    const runScanQueue = (queueIds) => {
+        if(!queueIds.length) return alert("Nimic de scanat!");
+        stopSignal.current = false;
+        setProgress({cur:0, tot:queueIds.length});
         let i = 0;
         const next = () => {
-            if(i >= products.length) { setProgress(null); return; }
-            setProgress({cur:i+1, tot:products.length});
-            check(products[i].id).then(() => { i++; setTimeout(next, 2000); });
+            if (stopSignal.current) { setProgress(null); setAutoStart(false); alert("🛑 Oprit."); return; }
+            if(i >= queueIds.length) { setProgress(null); alert("✅ Finalizat!"); return; }
+            setProgress({cur:i+1, tot:queueIds.length});
+            check(queueIds[i]).then(() => { i++; setTimeout(next, 2000); });
         };
         next();
     };
 
+    const runSelected = () => runScanQueue(Array.from(selected));
+    const runAll = () => { if(confirm("Scanezi TOT?")) runScanQueue(products.map(p => p.id)); };
+
+    useEffect(() => {
+        const timer = setInterval(() => {
+            if (autoStart && !progress && products.length > 0) {
+                const now = new Date();
+                const cur = now.getHours().toString().padStart(2,'0') + ":" + now.getMinutes().toString().padStart(2,'0');
+                if (cur === targetTime && lastRunDate !== now.toDateString()) {
+                    setLastRunDate(now.toDateString());
+                    runScanQueue(products.map(p => p.id));
+                }
+            }
+        }, 1000);
+        return () => clearInterval(timer);
+    }, [autoStart, targetTime, products, progress, lastRunDate]);
+
     return (
         <div className="p-6 max-w-[95%] mx-auto">
-            <div className="bg-[#1a1a1a] p-6 rounded-xl border border-[#333] mb-6 flex justify-between items-center">
+            <div className="bg-[#1a1a1a] p-6 rounded-xl border border-[#333] mb-6 flex flex-wrap justify-between items-center gap-4">
                 <div>
-                    <h1 className="text-2xl font-bold text-white flex gap-2"><span>📊</span> PriceMonitor v10</h1>
-                    <p className="text-gray-500 text-sm">Top 5 Competitori (9 Site-uri Scanate)</p>
+                    <h1 className="text-2xl font-bold text-white flex gap-2"><span>📊</span> PriceMonitor v13</h1>
+                    <p className="text-gray-500 text-sm">Cu Imagini • Selectare Manuală • Top 5</p>
                 </div>
-                <div className="flex gap-4">
-                    {progress && <span className="text-blue-400 font-mono self-center animate-pulse">Progres: {progress.cur}/{progress.tot}</span>}
-                    <button onClick={runBulk} disabled={!!progress} className="bg-gradient-to-r from-blue-600 to-indigo-600 px-6 py-2 rounded text-white font-bold hover:opacity-90 disabled:opacity-50">🚀 Start Scanare</button>
-                    <label className="bg-[#333] px-4 py-2 rounded cursor-pointer hover:bg-[#444] text-white">
-                        📂 CSV <input type="file" onChange={handleUpload} className="hidden"/>
-                    </label>
+                <div className="flex items-center gap-3 bg-[#222] p-2 rounded-lg border border-[#444]">
+                    <span className="text-gray-400 text-sm">⏰</span>
+                    <input type="time" value={targetTime} onChange={(e) => setTargetTime(e.target.value)} className="bg-[#333] text-white px-2 py-1 rounded border border-[#555] text-sm" disabled={autoStart}/>
+                    <button onClick={() => setAutoStart(!autoStart)} className={`px-3 py-1 rounded text-xs font-bold ${autoStart ? 'bg-green-600 text-white animate-pulse' : 'bg-gray-600 text-gray-300'}`}>{autoStart ? 'ON' : 'OFF'}</button>
+                </div>
+                <div className="flex gap-3">
+                    {progress ? (
+                        <div className="flex items-center gap-3">
+                            <span className="text-blue-400 font-mono animate-pulse">Progres: {progress.cur}/{progress.tot}</span>
+                            <button onClick={handleStop} className="bg-red-600 px-6 py-2 rounded text-white font-bold hover:bg-red-700 border border-red-500">🛑 STOP</button>
+                        </div>
+                    ) : (
+                        <div className="flex gap-3 items-center">
+                            <label className="bg-[#333] px-4 py-2 rounded cursor-pointer hover:bg-[#444] text-white border border-[#555] text-sm font-bold">📂 CSV <input type="file" onChange={handleUpload} className="hidden"/></label>
+                            {selected.size > 0 ? (
+                                <button onClick={runSelected} className="bg-green-600 px-4 py-2 rounded text-white font-bold hover:bg-green-700 shadow-lg border border-green-500 animate-pulse">✅ Scanează {selected.size} Selectate</button>
+                            ) : (
+                                <button onClick={runAll} disabled={!products.length} className="bg-blue-600 px-4 py-2 rounded text-white font-bold hover:bg-blue-700 disabled:opacity-50 border border-blue-500">🚀 Scanează TOT</button>
+                            )}
+                        </div>
+                    )}
                 </div>
             </div>
-
             <div className="bg-[#1a1a1a] rounded-xl border border-[#333] overflow-hidden">
                 <table className="w-full text-left text-sm text-gray-300">
-                    <thead className="bg-black text-gray-500 uppercase"><tr><th className="p-4 w-1/4">Produs</th><th className="p-4 w-32">Prețul Tău</th><th className="p-4">Top 5 Competitori (Cel mai mic preț)</th><th className="p-4 w-24">Acțiuni</th></tr></thead>
+                    <thead className="bg-black text-gray-500 uppercase">
+                        <tr>
+                            <th className="p-4 w-12 text-center"><input type="checkbox" onChange={toggleAll} checked={products.length > 0 && selected.size === products.length} /></th>
+                            <th className="p-4 w-1/4">Produs</th>
+                            <th className="p-4 w-32">Prețul Tău</th>
+                            <th className="p-4">Top 5 Competitori</th>
+                            <th className="p-4 w-24">Acțiuni</th>
+                        </tr>
+                    </thead>
                     <tbody className="divide-y divide-[#2a2a2a]">
                         {products.map(p => (
-                            <tr key={p.id} className="hover:bg-[#222]">
+                            <tr key={p.id} className={`hover:bg-[#222] ${selected.has(p.id) ? 'bg-[#2a2a35]' : ''}`}>
+                                <td className="p-4 text-center"><input type="checkbox" checked={selected.has(p.id)} onChange={() => toggleSelect(p.id)} /></td>
                                 <td className="p-4 align-top">
-                                    <div className="font-bold text-white mb-1">{p.name}</div>
-                                    <div className="text-xs bg-[#333] px-2 py-1 rounded inline-block font-mono text-gray-400">{p.sku}</div>
+                                    <div className="flex items-start gap-3">
+                                        <div className="w-16 h-16 bg-white rounded flex items-center justify-center overflow-hidden border border-gray-600 shrink-0">
+                                            {p.image ? (<img src={p.image} className="w-full h-full object-contain" onError={(e) => e.target.style.display='none'} />) : (<span className="text-2xl">📦</span>)}
+                                        </div>
+                                        <div><div className="font-bold text-white mb-1 text-sm">{p.name}</div><div className="text-xs bg-[#333] px-2 py-1 rounded inline-block font-mono text-gray-400">{p.sku}</div></div>
+                                    </div>
                                 </td>
                                 <td className="p-4 align-top text-xl font-bold text-emerald-400">{p.price} Lei</td>
                                 <td className="p-4">
-                                    {p.comps && p.comps.length > 0 ? (
-                                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-2">
-                                            {p.comps.map((c,k) => {
-                                                const isCheaper = c.price < p.price;
-                                                return (
-                                                    <div key={k} className={`p-2 rounded border ${isCheaper ? 'bg-red-900/20 border-red-800' : 'bg-green-900/20 border-green-800'} relative`}>
-                                                        <div className="absolute -top-2 -right-2 bg-[#333] text-white text-[10px] w-5 h-5 flex items-center justify-center rounded-full border border-[#555]">{k+1}</div>
-                                                        <div className="font-bold text-xs mb-1 text-gray-400">{c.name}</div>
-                                                        <div className={`text-lg font-bold ${isCheaper ? 'text-red-400' : 'text-green-400'}`}>{c.price}</div>
-                                                        <a href={c.url} target="_blank" className="text-[10px] text-blue-400 hover:underline block mt-1 truncate">Vezi produs ↗</a>
-                                                    </div>
-                                                )
-                                            })}
-                                        </div>
-                                    ) : <span className="text-gray-600 italic text-xs">Așteaptă scanarea...</span>}
+                                    {p.comps && p.comps.length > 0 ? (<div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-2">{p.comps.map((c,k) => {const isCheaper = c.price < p.price; return (<div key={k} className={`p-2 rounded border ${isCheaper ? 'bg-red-900/20 border-red-800' : 'bg-green-900/20 border-green-800'} relative`}><div className="absolute -top-2 -right-2 bg-[#333] text-white text-[10px] w-5 h-5 flex items-center justify-center rounded-full border border-[#555]">{k+1}</div><div className="font-bold text-xs mb-1 text-gray-400">{c.name}</div><div className={`text-lg font-bold ${isCheaper ? 'text-red-400' : 'text-green-400'}`}>{c.price}</div><a href={c.url} target="_blank" className="text-[10px] text-blue-400 hover:underline block mt-1 truncate">Link ↗</a></div>)})}</div>) : <span className="text-gray-600 italic text-xs">...</span>}
                                 </td>
-                                <td className="p-4 align-top">
-                                    <button onClick={() => check(p.id)} disabled={checkingId === p.id} 
-                                        className="text-blue-400 border border-blue-900/50 hover:bg-blue-900/20 px-3 py-2 rounded w-full transition">
-                                        {checkingId === p.id ? '⏳' : '🔍'}
-                                    </button>
-                                </td>
+                                <td className="p-4 align-top"><button onClick={() => check(p.id)} disabled={checkingId === p.id} className="text-blue-400 border border-blue-900/50 hover:bg-blue-900/20 px-3 py-2 rounded w-full transition">{checkingId === p.id ? '⏳' : '🔍'}</button></td>
                             </tr>
                         ))}
                     </tbody>
