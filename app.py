@@ -1,6 +1,7 @@
 import re
 import logging
 import time
+import json
 from urllib.parse import quote_plus
 from flask import Flask, request, jsonify, render_template
 from flask_cors import CORS
@@ -14,9 +15,8 @@ log.setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s | %(message)s', datefmt='%H:%M:%S')
 logger = logging.getLogger('PriceMonitor')
 
-# Site-uri blocate
 BLOCKED = ['google', 'bing', 'microsoft', 'facebook', 'youtube', 'doarbai', 'termohabitat', 
-           'wikipedia', 'amazon', 'ebay', 'olx', 'anre.ro', 'kaufland']
+           'wikipedia', 'amazon', 'ebay', 'olx']
 
 def clean_price(value):
     if not value: return 0
@@ -32,29 +32,105 @@ def clean_price(value):
     except:
         return 0
 
+def normalize(text):
+    import unicodedata
+    if not text: return ""
+    text = unicodedata.normalize('NFD', text).encode('ascii', 'ignore').decode()
+    return re.sub(r'[^a-z0-9]', '', text.lower())
+
 def is_valid_domain(domain):
-    """Verifică dacă domain-ul e valid"""
     if not domain or len(domain) < 5:
         return False
     if any(b in domain for b in BLOCKED):
         return False
-    # Trebuie să aibă cel puțin 2 caractere înainte de .ro
     match = re.match(r'^([a-z0-9-]+)\.ro$', domain)
     if match and len(match.group(1)) >= 3:
         return True
     return False
 
-def extract_from_bing(page, sku):
-    """Extrage prețuri și site-uri din Bing"""
-    results = []
+def extract_price_from_page(page):
+    """Extrage preț din pagina produsului"""
+    # JSON-LD
+    try:
+        for script in page.locator('script[type="application/ld+json"]').all()[:3]:
+            try:
+                data = json.loads(script.inner_text())
+                items = data if isinstance(data, list) else [data]
+                for item in items:
+                    if item.get('@type') == 'Product':
+                        offers = item.get('offers', {})
+                        if isinstance(offers, list):
+                            offers = offers[0] if offers else {}
+                        price = offers.get('price') or offers.get('lowPrice')
+                        if price:
+                            p = clean_price(price)
+                            if p > 0:
+                                return p
+            except:
+                continue
+    except:
+        pass
+    
+    # META
+    for sel in ['meta[property="product:price:amount"]']:
+        try:
+            p = clean_price(page.locator(sel).first.get_attribute('content'))
+            if p > 0:
+                return p
+        except:
+            pass
+    
+    # CSS
+    for sel in ['[data-price-amount]', '.price', '[class*="price"]']:
+        try:
+            el = page.locator(sel).first
+            p = clean_price(el.get_attribute('data-price-amount') or el.inner_text())
+            if p > 0:
+                return p
+        except:
+            pass
+    
+    return 0
+
+def verify_product_on_page(page, url, sku):
+    """Accesează URL-ul și verifică dacă produsul există"""
+    try:
+        page.goto(url, timeout=12000, wait_until='domcontentloaded')
+        time.sleep(1.5)
+        
+        body_text = page.locator('body').inner_text().lower()
+        
+        # Verifică dacă e pagină de eroare
+        error_phrases = ['not found', 'nothing found', 'nu a fost gasit', 'no results', 
+                        'nu exista', 'pagina nu exista', '404', 'sorry']
+        if any(phrase in body_text for phrase in error_phrases):
+            return None
+        
+        # Verifică dacă SKU există în pagină
+        sku_norm = normalize(sku)
+        if sku_norm not in normalize(body_text) and sku_norm[1:] not in normalize(body_text):
+            return None
+        
+        # Extrage prețul
+        price = extract_price_from_page(page)
+        if price > 0:
+            return price
+            
+    except:
+        pass
+    
+    return None
+
+def get_urls_from_bing(page, sku):
+    """Extrage URL-uri din rezultatele Bing"""
+    urls = []
     
     try:
-        # Ia toate rezultatele de căutare
-        search_results = page.locator('.b_algo').all()
+        # Caută în rezultatele Bing
+        results = page.locator('.b_algo').all()
         
-        for result in search_results[:10]:
+        for result in results[:15]:
             try:
-                # Extrage URL
                 link = result.locator('a').first
                 href = link.get_attribute('href') or ''
                 
@@ -62,63 +138,37 @@ def extract_from_bing(page, sku):
                 domain_match = re.search(r'https?://(?:www\.)?([a-z0-9-]+\.ro)', href.lower())
                 if not domain_match:
                     continue
+                    
                 domain = domain_match.group(1)
-                
                 if not is_valid_domain(domain):
                     continue
                 
-                # Extrage textul rezultatului
+                # Extrage preț din snippet (pentru referință)
                 text = result.inner_text()
+                price_match = re.search(r'([\d.,]+)\s*(?:RON|Lei)', text)
+                hint_price = clean_price(price_match.group(1)) if price_match else 0
                 
-                # Caută preț în text
-                price_match = re.search(r'([\d.,]+)\s*(?:RON|Lei|lei|Ron)', text)
-                if price_match:
-                    price = clean_price(price_match.group(1))
-                    if price > 0:
-                        results.append({
-                            'name': domain,
-                            'price': price,
-                            'url': href,
-                            'method': 'Bing'
-                        })
-                        logger.info(f"      ✓ {domain}: {price} Lei")
-                        
+                urls.append({
+                    'url': href,
+                    'domain': domain,
+                    'hint_price': hint_price
+                })
+                
             except:
                 continue
-        
-        # Dacă nu găsim prețuri în rezultate, caută în tot body-ul
-        if not results:
-            body_text = page.locator('body').inner_text()
-            
-            # Găsește toate aparițiile: preț + domeniu în apropiere
-            # Pattern: domeniu.ro urmat de preț sau invers
-            
-            # Extrage toate domeniile valide
-            domains = re.findall(r'(?:https?://)?(?:www\.)?([a-z0-9-]+\.ro)', body_text.lower())
-            valid_domains = [d for d in set(domains) if is_valid_domain(d)]
-            
-            # Extrage toate prețurile
-            prices = re.findall(r'([\d.,]+)\s*(?:RON|Lei)', body_text)
-            valid_prices = [clean_price(p) for p in prices if clean_price(p) > 0]
-            
-            logger.info(f"      Domenii: {valid_domains[:5]}")
-            logger.info(f"      Prețuri: {valid_prices[:5]}")
-            
-            # Asociază primul preț cu fiecare domain găsit
-            if valid_prices and valid_domains:
-                main_price = valid_prices[0]  # Presupunem că primul preț e cel relevant
-                for domain in valid_domains[:5]:
-                    results.append({
-                        'name': domain,
-                        'price': main_price,
-                        'url': f"https://www.{domain}",
-                        'method': 'Bing-Text'
-                    })
-        
-    except Exception as e:
-        logger.debug(f"Bing extract error: {e}")
+                
+    except:
+        pass
     
-    return results
+    # Deduplicate by domain
+    seen = set()
+    unique = []
+    for u in urls:
+        if u['domain'] not in seen:
+            seen.add(u['domain'])
+            unique.append(u)
+    
+    return unique
 
 def scan_product(sku, name, your_price=0):
     found = []
@@ -137,7 +187,7 @@ def scan_product(sku, name, your_price=0):
         page = context.new_page()
         
         try:
-            # Bing search
+            # ETAPA 1: Bing search
             query = f"{sku} pret"
             url = f"https://www.bing.com/search?q={quote_plus(query)}"
             
@@ -146,18 +196,38 @@ def scan_product(sku, name, your_price=0):
             page.goto(url, timeout=20000, wait_until='domcontentloaded')
             time.sleep(2)
             
-            # Click Accept cookies dacă apare
+            # Accept cookies
             try:
                 page.click('#bnp_btn_accept', timeout=2000)
+                time.sleep(0.5)
             except:
                 pass
             
-            time.sleep(1)
+            # Extrage URL-uri
+            urls = get_urls_from_bing(page, sku)
+            logger.info(f"   📋 Găsite {len(urls)} URL-uri de verificat")
             
-            # Extrage rezultate
-            found = extract_from_bing(page, sku)
-            
-            logger.info(f"   📋 Bing: {len(found)} rezultate")
+            # ETAPA 2: Verifică fiecare URL
+            for item in urls:
+                logger.info(f"      🔗 Verific {item['domain']}...")
+                
+                price = verify_product_on_page(page, item['url'], sku)
+                
+                if price:
+                    found.append({
+                        'name': item['domain'],
+                        'price': price,
+                        'url': item['url'],
+                        'method': 'Bing+Verify'
+                    })
+                    logger.info(f"      ✅ {item['domain']}: {price} Lei")
+                else:
+                    logger.info(f"      ❌ {item['domain']}: produs negăsit")
+                
+                time.sleep(0.3)
+                
+                if len(found) >= 5:
+                    break
             
         except Exception as e:
             logger.info(f"   ❌ Error: {str(e)[:50]}")
@@ -166,24 +236,16 @@ def scan_product(sku, name, your_price=0):
         
         browser.close()
     
-    # Deduplicate
-    seen = {}
-    unique = []
-    for r in found:
-        if r['name'] not in seen:
-            seen[r['name']] = r
-            unique.append(r)
-    
     # Calculează diferență
-    for r in unique:
+    for r in found:
         if your_price > 0:
             r['diff'] = round(((r['price'] - your_price) / your_price) * 100, 1)
         else:
             r['diff'] = 0
     
-    unique.sort(key=lambda x: x['price'])
-    logger.info(f"📊 Total: {len(unique)}")
-    return unique[:5]
+    found.sort(key=lambda x: x['price'])
+    logger.info(f"📊 Total verificate: {len(found)}")
+    return found[:5]
 
 @app.route('/')
 def index():
@@ -197,5 +259,5 @@ def api_check():
     return jsonify({"status": "success", "competitors": results})
 
 if __name__ == '__main__':
-    logger.info("🚀 PriceMonitor v7.2 (Bing Optimized) pe :8080")
+    logger.info("🚀 PriceMonitor v7.3 (Bing + Verificare) pe :8080")
     app.run(host='0.0.0.0', port=8080)
