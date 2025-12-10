@@ -4,7 +4,7 @@ import time
 import random
 import unicodedata
 import json
-from urllib.parse import quote_plus, urlparse
+from urllib.parse import quote_plus
 from flask import Flask, request, jsonify, render_template
 from flask_cors import CORS
 from playwright.sync_api import sync_playwright
@@ -18,60 +18,58 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s | %(message)s', date
 logger = logging.getLogger('PriceMonitor')
 
 # ═══════════════════════════════════════════════════════════════
-# SITE-URI ACTUALIZATE - din Google results
+# SITE-URI CU PATTERN-URI URL DIRECTE
 # ═══════════════════════════════════════════════════════════════
 SITES = {
-    # Site-uri cu produse Ideal Standard (din Google)
-    'instalatiaz.ro': {
-        'search': 'https://www.instalatiaz.ro/cautare?q={}',
-        'alt_search': 'https://www.instalatiaz.ro/?s={}'
-    },
     'foglia.ro': {
         'search': 'https://www.foglia.ro/catalogsearch/result/?q={}',
+        'direct_patterns': [
+            'https://www.foglia.ro/{}',
+            'https://www.foglia.ro/{}.html',
+        ]
     },
     'bagno.ro': {
         'search': 'https://www.bagno.ro/catalogsearch/result/?q={}',
-    },
-    'decostores.ro': {
-        'search': 'https://www.decostores.ro/catalogsearch/result/?q={}',
-    },
-    'vasetoaleta.ro': {
-        'search': 'https://www.vasetoaleta.ro/catalogsearch/result/?q={}',
-    },
-    'compari.ro': {
-        'search': 'https://www.compari.ro/search.html?search_query={}',
-    },
-    # Site-uri din sesiunea anterioară
-    'sensodays.ro': {
-        'search': 'https://www.sensodays.ro/catalogsearch/result/?q={}',
-    },
-    'germanquality.ro': {
-        'search': 'https://www.germanquality.ro/catalogsearch/result/?q={}',
+        'direct_patterns': [
+            'https://www.bagno.ro/{}.html',
+            'https://www.bagno.ro/{}-ideal-standard.html',
+        ]
     },
     'absulo.ro': {
         'search': 'https://www.absulo.ro/catalogsearch/result/?q={}',
-    },
-    'novambient.ro': {
-        'search': 'https://www.novambient.ro/catalogsearch/result/?q={}',
-    },
-    'neakaisa.ro': {
-        'search': 'https://neakaisa.ro/index.php?route=product/search&search={}',
+        'direct_patterns': [
+            'https://absulo.ro/ideal-standard-{}',
+        ]
     },
     'sanitino.ro': {
         'search': 'https://www.sanitino.ro/cauta/?q={}',
+        'direct_patterns': [
+            'https://www.sanitino.ro/ideal-standard-oleas-{}',
+        ]
     },
-    # Magazine mari
-    'dedeman.ro': {
-        'search': 'https://www.dedeman.ro/ro/cautare?q={}',
+    'sensodays.ro': {
+        'search': 'https://www.sensodays.ro/catalogsearch/result/?q={}',
+        'direct_patterns': []
     },
-    'emag.ro': {
-        'search': 'https://www.emag.ro/search/{}',
+    'germanquality.ro': {
+        'search': 'https://www.germanquality.ro/catalogsearch/result/?q={}',
+        'direct_patterns': []
+    },
+    'novambient.ro': {
+        'search': 'https://www.novambient.ro/catalogsearch/result/?q={}',
+        'direct_patterns': []
     },
     'romstal.ro': {
         'search': 'https://www.romstal.ro/cautare?q={}',
+        'direct_patterns': []
+    },
+    'dedeman.ro': {
+        'search': 'https://www.dedeman.ro/ro/cautare?q={}',
+        'direct_patterns': []
     },
     'hornbach.ro': {
         'search': 'https://www.hornbach.ro/s/{}',
+        'direct_patterns': []
     },
 }
 
@@ -134,12 +132,11 @@ def extract_price(page):
         except:
             pass
     
-    # 3. CSS - mai multe selectoare
+    # 3. CSS
     selectors = [
         '[data-price-amount]', '[data-price]', 'span[itemprop="price"]',
         '.product-new-price', '.price-new', '.current-price', '.special-price .price',
-        '.product-price', '.price-box .price', '.price-wrapper .price',
-        '.price', '[class*="price"]:not([class*="old"]):not([class*="regular"])'
+        '.product-price', '.price-box .price', '.price'
     ]
     for sel in selectors:
         try:
@@ -159,140 +156,146 @@ def extract_price(page):
     return 0, None
 
 def sku_in_page(sku, page):
-    """Verifică dacă SKU-ul e în pagină"""
+    """Verifică dacă SKU e în pagină"""
     sku_norm = normalize(str(sku))
-    if len(sku_norm) < 4:
-        return True
-    
     try:
         # În URL
         if sku_norm in normalize(page.url):
             return True
-        
         # În body
         body = page.locator('body').inner_text()
-        body_norm = normalize(body)
-        
-        if sku_norm in body_norm:
+        if sku_norm in normalize(body):
             return True
-        if sku_norm[1:] in body_norm:  # Fără prima literă
-            return True
-        # Primele 5 caractere
-        if len(sku_norm) >= 5 and sku_norm[:5] in body_norm:
+        if sku_norm[1:] in normalize(body):
             return True
     except:
         pass
-    
     return False
 
-def find_product_links(page, domain):
-    """Găsește link-uri către produse în pagina de căutare"""
-    links = []
+def wait_for_content(page):
+    """Așteaptă să se încarce conținutul dinamic"""
+    try:
+        # Scroll pentru a declanșa lazy loading
+        page.evaluate("window.scrollTo(0, 500)")
+        time.sleep(0.5)
+        page.evaluate("window.scrollTo(0, 1000)")
+        time.sleep(0.5)
+        
+        # Așteaptă să nu mai fie cereri de rețea
+        page.wait_for_load_state('networkidle', timeout=5000)
+    except:
+        pass
+
+def find_product_url_in_search(page, domain, sku):
+    """Găsește URL-ul produsului în pagina de căutare"""
+    sku_lower = sku.lower()
+    sku_norm = normalize(sku)
     
-    # Selectoare generice pentru link-uri produse
-    selectors = [
-        '.product-item a.product-item-link',
-        '.product-item-info a',
-        '.product a',
-        '.product-layout a',
-        '.product-thumb a',
-        '.card-item a',
-        'a[href*="/p/"]',
-        'a[href*="/produs/"]', 
-        'a[href*="/product/"]',
-        'a[href*="-p-"]',
-        '.products-grid a',
-        '.product-name a',
-        'h2 a', 'h3 a', 'h4 a'  # Titluri de produse
-    ]
-    
-    for sel in selectors:
-        try:
-            for link in page.locator(sel).all()[:10]:
+    try:
+        # Caută toate link-urile
+        all_links = page.locator('a[href]').all()
+        
+        for link in all_links:
+            try:
                 href = link.get_attribute('href')
                 if not href:
                     continue
                 
+                href_lower = href.lower()
+                
                 # Skip linkuri invalide
-                if any(x in href.lower() for x in ['/cart', '/login', '/account', '/wishlist', 'javascript:', '#']):
+                if any(x in href_lower for x in ['cart', 'login', 'account', 'wishlist', 'mailto:', 'javascript:', 'tel:', '#', '.pdf', '.jpg']):
                     continue
                 
-                # Construiește URL complet
-                if not href.startswith('http'):
-                    href = f"https://www.{domain}{href}" if not href.startswith('/') else f"https://www.{domain}{href}"
-                
-                if href not in links and domain in href:
-                    links.append(href)
+                # Verifică dacă SKU e în URL
+                if sku_lower in href_lower or sku_norm in normalize(href):
+                    # Construiește URL complet
+                    if href.startswith('/'):
+                        href = f"https://www.{domain}{href}"
+                    elif not href.startswith('http'):
+                        continue
                     
-        except:
-            continue
+                    if domain in href:
+                        return href
+                        
+            except:
+                continue
+                
+    except:
+        pass
     
-    return links[:5]  # Max 5 produse
+    return None
 
 def scrape_site(context, domain, config, sku, name):
-    """Caută și extrage preț de pe un site"""
+    """Caută produs pe un site"""
     page = None
+    sku_lower = sku.lower()
+    
     try:
         page = context.new_page()
         
-        # Încearcă URL-ul principal de căutare
-        search_urls = [config['search'].format(quote_plus(sku))]
-        if 'alt_search' in config:
-            search_urls.append(config['alt_search'].format(quote_plus(sku)))
+        # ═══════════════════════════════════════════════════════
+        # METODA 1: Căutare pe site + găsire link cu SKU
+        # ═══════════════════════════════════════════════════════
+        search_url = config['search'].format(quote_plus(sku))
         
-        for search_url in search_urls:
-            try:
-                page.goto(search_url, timeout=20000, wait_until='domcontentloaded')
-                time.sleep(random.uniform(1.5, 2.5))
-                
-                # Accept cookies
-                for btn in ['Accept', 'Acceptă', 'OK', 'Agree', 'Sunt de acord']:
-                    try:
-                        page.click(f'button:has-text("{btn}")', timeout=800)
-                        break
-                    except:
-                        pass
-                
-                # Găsește link-uri produse
-                product_links = find_product_links(page, domain)
-                
-                if product_links:
+        try:
+            page.goto(search_url, timeout=25000, wait_until='domcontentloaded')
+            time.sleep(2)
+            
+            # Accept cookies
+            for btn in ['Accept', 'Acceptă', 'OK', 'Agree', 'Sunt de acord']:
+                try:
+                    page.click(f'button:has-text("{btn}")', timeout=800)
                     break
+                except:
+                    pass
+            
+            wait_for_content(page)
+            
+            # Caută link cu SKU în URL
+            product_url = find_product_url_in_search(page, domain, sku)
+            
+            if product_url:
+                logger.info(f"   🔗 {domain}: găsit link cu SKU")
+                page.goto(product_url, timeout=20000, wait_until='domcontentloaded')
+                time.sleep(1.5)
+                wait_for_content(page)
+                
+                if sku_in_page(sku, page):
+                    price, method = extract_price(page)
+                    if price > 0:
+                        return {'name': domain, 'price': price, 'url': product_url, 'method': method}
+            
+            # Verifică dacă SKU e direct în pagina de rezultate
+            if sku_in_page(sku, page):
+                price, method = extract_price(page)
+                if price > 0:
+                    logger.info(f"   💰 {domain}: preț direct în căutare")
+                    return {'name': domain, 'price': price, 'url': search_url, 'method': method}
                     
-            except:
-                continue
+        except Exception as e:
+            logger.debug(f"   Search error {domain}: {str(e)[:30]}")
         
-        if not product_links:
-            logger.info(f"   ⚪ {domain}: 0 produse")
-            return None
-        
-        logger.info(f"   🔍 {domain}: {len(product_links)} link-uri")
-        
-        # Verifică fiecare produs
-        for href in product_links:
+        # ═══════════════════════════════════════════════════════
+        # METODA 2: URL-uri directe cu pattern
+        # ═══════════════════════════════════════════════════════
+        for pattern in config.get('direct_patterns', []):
             try:
-                page.goto(href, timeout=15000, wait_until='domcontentloaded')
+                direct_url = pattern.format(sku_lower)
+                page.goto(direct_url, timeout=15000, wait_until='domcontentloaded')
                 time.sleep(1)
                 
-                # Validare SKU
-                if not sku_in_page(sku, page):
-                    logger.info(f"      ✗ SKU absent în: {href[:55]}...")
-                    continue
-                
-                # Extrage preț
-                price, method = extract_price(page)
-                
-                if price > 0:
-                    logger.info(f"      ✓ SKU găsit! {price} Lei [{method}]")
-                    return {
-                        'name': domain,
-                        'price': price,
-                        'url': href,
-                        'method': method
-                    }
-                    
+                # Verifică dacă pagina există și conține SKU
+                if page.url and '404' not in page.url and sku_in_page(sku, page):
+                    price, method = extract_price(page)
+                    if price > 0:
+                        logger.info(f"   🎯 {domain}: găsit via pattern direct")
+                        return {'name': domain, 'price': price, 'url': direct_url, 'method': method}
             except:
                 continue
+        
+        logger.info(f"   ⚪ {domain}: negăsit")
         
     except Exception as e:
         logger.debug(f"   ❌ {domain}: {str(e)[:40]}")
@@ -329,7 +332,7 @@ def scan_product(sku, name, your_price=0):
                     result['diff'] = 0
                 
                 found.append(result)
-                logger.info(f"   ✅ {domain}: {result['price']} Lei ({result['diff']:+.1f}%)")
+                logger.info(f"   ✅ {domain}: {result['price']} Lei ({result['diff']:+.1f}%) [{result['method']}]")
             
             time.sleep(random.uniform(0.5, 1))
         
@@ -351,5 +354,5 @@ def api_check():
     return jsonify({"status": "success", "competitors": results})
 
 if __name__ == '__main__':
-    logger.info("🚀 PriceMonitor v4.2 (16 site-uri + better selectors) pe :8080")
+    logger.info("🚀 PriceMonitor v5.0 (Direct URL Patterns + Smart Search) pe :8080")
     app.run(host='0.0.0.0', port=8080)
