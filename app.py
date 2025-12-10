@@ -19,6 +19,58 @@ logger = logging.getLogger('PriceMonitor')
 DEBUG_DIR = '/root/monitor/debug'
 os.makedirs(DEBUG_DIR, exist_ok=True)
 
+# ============ DIMENSION VALIDATION (V10.7) ============
+def extract_dimensions(text):
+    """Extract dimensions: 180x80, 180×80, 180 x 80"""
+    if not text:
+        return []
+    pattern = r'(\d+)\s*[x×]\s*(\d+)'
+    matches = re.findall(pattern, text, re.IGNORECASE)
+    dimensions = []
+    for match in matches:
+        dim = f"{match[0]}x{match[1]}"
+        if dim not in dimensions:
+            dimensions.append(dim)
+    return dimensions
+
+def normalize_dimensions(dim_list):
+    """Normalize for comparison: [180x80] → [80x180]"""
+    normalized = []
+    for dim in dim_list:
+        parts = dim.split('x')
+        if len(parts) == 2:
+            try:
+                a, b = int(parts[0]), int(parts[1])
+                sorted_dim = f"{min(a,b)}x{max(a,b)}"
+                if sorted_dim not in normalized:
+                    normalized.append(sorted_dim)
+            except:
+                pass
+    return sorted(normalized)
+
+def validate_dimensions(sku_name, snippet_text, threshold=0.7):
+    """Compare SKU dimensions vs snippet dimensions"""
+    sku_dims = extract_dimensions(sku_name)
+    snippet_dims = extract_dimensions(snippet_text)
+    
+    if not sku_dims:
+        return {'valid': True, 'reason': 'No dims in SKU'}
+    
+    if not snippet_dims:
+        return {'valid': False, 'reason': 'No dims in snippet'}
+    
+    sku_dims_norm = normalize_dimensions(sku_dims)
+    snippet_dims_norm = normalize_dimensions(snippet_dims)
+    
+    matches = [d for d in sku_dims_norm if d in snippet_dims_norm]
+    match_rate = len(matches) / len(sku_dims_norm) if sku_dims_norm else 0
+    is_valid = match_rate >= threshold
+    
+    return {
+        'valid': is_valid,
+        'reason': f"Match {len(matches)}/{len(sku_dims_norm)}" if is_valid else f"Mismatch {len(matches)}/{len(sku_dims_norm)}"
+    }
+
 BLOCKED = ['google', 'bing', 'microsoft', 'facebook', 'youtube', 'doarbai', 'termohabitat', 'wikipedia', 'amazon', 'ebay']
 
 SEARCH_URLS = {
@@ -236,12 +288,13 @@ def extract_from_google_html(page, sku):
 
 
 
-def google_stealth_search(page, query, sku_for_match=None):
+def google_stealth_search(page, query, sku_for_match=None, sku_name=None):
     """
     Google caută în tăcere, face 'poză' la prima pagină.
     Returnează lista de {domain, price} găsite în snippets.
     query = ce căutăm (SKU sau denumire)
     sku_for_match = SKU-ul pentru salvarea fișierelor debug (opțional)
+    sku_name = product name pentru validare dimensiuni (V10.7)
     """
     results = []
     search_query = f"{query} pret RON"
@@ -306,6 +359,13 @@ def google_stealth_search(page, query, sku_for_match=None):
                     foglia_price = extract_foglia_price(context)
                     if foglia_price and foglia_price > 0:
                         if not any(r['domain'] == current_domain for r in results):
+                            # V10.7: VALIDARE DIMENSIUNI
+                            if sku_name:
+                                dim_check = validate_dimensions(sku_name, context)
+                                if not dim_check['valid']:
+                                    logger.info(f"      🔴 {current_domain}: {foglia_price} Lei - REJECTED (dims: {dim_check['reason']})")
+                                    continue
+                            
                             results.append({
                                 'domain': current_domain,
                                 'price': foglia_price,
@@ -319,6 +379,13 @@ def google_stealth_search(page, query, sku_for_match=None):
                     neakaisa_price = extract_neakaisa_price(context)
                     if neakaisa_price and neakaisa_price > 0:
                         if not any(r['domain'] == current_domain for r in results):
+                            # V10.7: VALIDARE DIMENSIUNI
+                            if sku_name:
+                                dim_check = validate_dimensions(sku_name, context)
+                                if not dim_check['valid']:
+                                    logger.info(f"      🔴 {current_domain}: {neakaisa_price} Lei - REJECTED (dims: {dim_check['reason']})")
+                                    continue
+                            
                             results.append({
                                 'domain': current_domain,
                                 'price': neakaisa_price,
@@ -350,6 +417,14 @@ def google_stealth_search(page, query, sku_for_match=None):
                 # Ia cel mai MIC preț care NU e transport
                 if valid_prices:
                     price = min(valid_prices)
+                    
+                    # V10.7: VALIDARE DIMENSIUNI
+                    if sku_name:
+                        dim_check = validate_dimensions(sku_name, context)
+                        if not dim_check['valid']:
+                            logger.info(f"      🔴 {current_domain}: {price} Lei - REJECTED (dims: {dim_check['reason']})")
+                            continue
+                    
                     # Verifică să nu fie duplicat
                     if not any(r['domain'] == current_domain for r in results):
                         results.append({
@@ -396,6 +471,15 @@ def google_stealth_search(page, query, sku_for_match=None):
                     if current_domain == 'foglia.ro':
                         foglia_price = extract_foglia_price(block_text)
                         if foglia_price and foglia_price > 0:
+                            # V10.7: VALIDARE DIMENSIUNI
+                            if sku_name:
+                                dim_check = validate_dimensions(sku_name, block_text)
+                                if not dim_check['valid']:
+                                    logger.info(f"      🔴 {current_domain}: {foglia_price} Lei - REJECTED (dims: {dim_check['reason']})")
+                                    current_domain = None
+                                    domain_line = -1
+                                    continue
+                            
                             results.append({
                                 'domain': current_domain,
                                 'price': foglia_price,
@@ -410,6 +494,15 @@ def google_stealth_search(page, query, sku_for_match=None):
                     if current_domain == 'neakaisa.ro':
                         neakaisa_price = extract_neakaisa_price(block_text)
                         if neakaisa_price and neakaisa_price > 0:
+                            # V10.7: VALIDARE DIMENSIUNI
+                            if sku_name:
+                                dim_check = validate_dimensions(sku_name, block_text)
+                                if not dim_check['valid']:
+                                    logger.info(f"      🔴 {current_domain}: {neakaisa_price} Lei - REJECTED (dims: {dim_check['reason']})")
+                                    current_domain = None
+                                    domain_line = -1
+                                    continue
+                            
                             results.append({
                                 'domain': current_domain,
                                 'price': neakaisa_price,
@@ -444,6 +537,16 @@ def google_stealth_search(page, query, sku_for_match=None):
                         # Pentru produse scumpe, ia primul preț valid (nu min)
                         # min() poate lua prețuri de alte produse din snippet
                         price = valid_prices[0]
+                        
+                        # V10.7: VALIDARE DIMENSIUNI
+                        if sku_name:
+                            dim_check = validate_dimensions(sku_name, block_text)
+                            if not dim_check['valid']:
+                                logger.info(f"      🔴 {current_domain}: {price} Lei - REJECTED (dims: {dim_check['reason']})")
+                                current_domain = None
+                                domain_line = -1
+                                continue
+                        
                         results.append({
                             'domain': current_domain,
                             'price': price,
@@ -608,7 +711,7 @@ def scan_product(sku, name, your_price=0):
         try:
             # ========== PASUL 1: GOOGLE SEARCH BY SKU ==========
             logger.info(f"   🔍 Google #1: SKU...")
-            google_results = google_stealth_search(page, sku, sku)
+            google_results = google_stealth_search(page, sku, sku, sku_name=name)
             
             # Adaugă rezultatele cu preț direct
             for r in google_results:
@@ -629,7 +732,7 @@ def scan_product(sku, name, your_price=0):
                 if sku.upper() not in name_query.upper():
                     name_query += f" {sku}"
                 
-                google_results_name = google_stealth_search(page, name_query, f"{sku}_name")
+                google_results_name = google_stealth_search(page, name_query, f"{sku}_name", sku_name=name)
                 
                 # Adaugă doar site-uri noi
                 for r in google_results_name:
@@ -717,5 +820,5 @@ def get_debug(filename):
     return "Not found", 404
 
 if __name__ == '__main__':
-    logger.info("🚀 PriceMonitor v10.6 (Neakaisa Fix) pe :8080")
+    logger.info("🚀 PriceMonitor v10.7 (Dimension Validation) pe :8080")
     app.run(host='0.0.0.0', port=8080)
