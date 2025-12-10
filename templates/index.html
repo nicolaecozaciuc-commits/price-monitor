@@ -2,7 +2,7 @@
 <html lang="ro">
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Price Monitor v13</title>
+<title>Price Monitor v13.2</title>
 <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -26,6 +26,7 @@ const Dashboard = () => {
     const [lastRunDate, setLastRunDate] = useState(null);
     const stopSignal = useRef(false);
 
+    // CSV PARSER INTELIGENT
     const parseCSV = (text) => {
         const rows = []; let cur = []; let cell = ''; let q = false;
         text.replace(/\r\n/g,'\n').replace(/\r/g,'\n').split('').forEach(c => {
@@ -40,6 +41,7 @@ const Dashboard = () => {
     const parsePrice = (p) => {
         if (!p) return 0;
         let c = String(p).trim();
+        // Format RO: 7.999,00 -> 7999.00
         if (c.includes(',') && c.indexOf(',') > c.lastIndexOf('.')) c = c.replace(/\./g, '').replace(',', '.');
         else if (c.includes(',')) c = c.replace(',', '.');
         return parseFloat(c.replace(/[^0-9.]/g, '')) || 0;
@@ -51,23 +53,37 @@ const Dashboard = () => {
             const rows = parseCSV(evt.target.result);
             if(rows.length < 2) return alert("CSV Invalid");
             const h = rows[0].map(x => x.toLowerCase().replace(/[^a-z0-9]/g, ''));
+            
             let iSku = h.findIndex(x => x.includes('sku'));
             let iName = h.findIndex(x => x.includes('nume'));
-            let iPrice = h.indexOf('pretnostru');
-            if(iPrice === -1) iPrice = h.findIndex(x => x.includes('pretobisnuit') || (x.includes('pret') && !x.includes('concurent')));
             
-            // Detectie Imagini
+            // LOGICA DETECTIE PRET (Prioritate: Pret Nostru > Pret Obisnuit > Pret Simplu)
+            let iPrice = h.indexOf('pretnostru');
+            if(iPrice === -1) iPrice = h.findIndex(x => x.includes('pretobisnuit'));
+            if(iPrice === -1) iPrice = h.findIndex(x => (x.includes('pret') || x.includes('price')) && !x.includes('concurent') && !x.includes('promo'));
+            
+            // DETECTIE IMAGINI
             let iImg = h.findIndex(x => x.includes('imagini') || x.includes('images') || x.includes('poza'));
 
             if(iSku === -1) return alert("Nu gasesc SKU");
             
             setProducts(rows.slice(1).map((r, k) => {
                 if(r.length <= iSku) return null;
+                
+                // Extragere URL imagine (prima din lista)
                 let imgUrl = null;
                 if (iImg !== -1 && r[iImg]) imgUrl = r[iImg].split(',')[0].trim();
 
+                // Parsare pret corect (sau 0 daca lipseste)
+                let finalPrice = iPrice !== -1 && r[iPrice] ? parsePrice(r[iPrice]) : 0;
+
                 return {
-                    id: k, sku: r[iSku], name: r[iName]||'', price: parsePrice(r[iPrice]), image: imgUrl, comps: []
+                    id: k, 
+                    sku: r[iSku], 
+                    name: r[iName]||'', 
+                    price: finalPrice, 
+                    image: imgUrl, 
+                    comps: []
                 };
             }).filter(x => x && x.sku));
         };
@@ -133,8 +149,8 @@ const Dashboard = () => {
         <div className="p-6 max-w-[95%] mx-auto">
             <div className="bg-[#1a1a1a] p-6 rounded-xl border border-[#333] mb-6 flex flex-wrap justify-between items-center gap-4">
                 <div>
-                    <h1 className="text-2xl font-bold text-white flex gap-2"><span>📊</span> PriceMonitor v13</h1>
-                    <p className="text-gray-500 text-sm">Cu Imagini • Selectare Manuală • Top 5</p>
+                    <h1 className="text-2xl font-bold text-white flex gap-2"><span>📊</span> PriceMonitor v13.2</h1>
+                    <p className="text-gray-500 text-sm">Preț CSV Corect • Imagini • Bife</p>
                 </div>
                 <div className="flex items-center gap-3 bg-[#222] p-2 rounded-lg border border-[#444]">
                     <span className="text-gray-400 text-sm">⏰</span>
