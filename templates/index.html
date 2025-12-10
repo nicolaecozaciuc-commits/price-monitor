@@ -2,7 +2,7 @@
 <html lang="ro">
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Price Monitor v14</title>
+<title>Price Monitor v1.4</title>
 <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -26,7 +26,12 @@ const Dashboard = () => {
     const [lastRunDate, setLastRunDate] = useState(null);
     const stopSignal = useRef(false);
 
-    // CSV Parser Robust (WooCommerce Fix)
+    // --- PARSER CSV INTELIGENT ---
+    const normalize = (str) => {
+        if (!str) return "";
+        return str.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]/g, "");
+    };
+
     const parseCSV = (text) => {
         const rows = []; let cur = []; let cell = ''; let q = false;
         text.replace(/\r\n/g,'\n').replace(/\r/g,'\n').split('').forEach(c => {
@@ -41,15 +46,10 @@ const Dashboard = () => {
     const parsePrice = (p) => {
         if (!p) return 0;
         let c = String(p).trim();
+        // Format RO: 7.999,00
         if (c.includes(',') && c.indexOf(',') > c.lastIndexOf('.')) c = c.replace(/\./g, '').replace(',', '.');
         else if (c.includes(',')) c = c.replace(',', '.');
         return parseFloat(c.replace(/[^0-9.]/g, '')) || 0;
-    };
-
-    // Normalizeaza header pentru a gasi coloane indiferent de diacritice
-    const normalize = (str) => {
-        if (!str) return "";
-        return str.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]/g, "");
     };
 
     const handleUpload = (e) => {
@@ -64,14 +64,15 @@ const Dashboard = () => {
             let iSku = normHeaders.findIndex(h => h.includes('sku'));
             let iName = normHeaders.findIndex(h => h.includes('nume'));
             
-            // Detectie Imagini
-            let iImg = normHeaders.findIndex(h => h.includes('imagini') || h.includes('images') || h.includes('poza'));
-            // Detectie Pret (Prioritate: Pret Nostru > Pret Obisnuit)
+            // Logica Pret: Pret Nostru > Pret Obisnuit > Pret Simplu
             let iPrice = normHeaders.indexOf('pretnostru');
-            if(iPrice === -1) iPrice = normHeaders.findIndex(h => h.includes('pretobisnuit'));
-            if(iPrice === -1) iPrice = normHeaders.findIndex(h => (h.includes('pret') || h.includes('price')) && !h.includes('concurent'));
+            if(iPrice === -1) iPrice = normHeaders.findIndex(h => h.includes('pretobisnuit') || h.includes('regularprice'));
+            if(iPrice === -1) iPrice = normHeaders.findIndex(h => (h.includes('pret') || h.includes('price')) && !h.includes('concurent') && !h.includes('promo'));
+            
+            // Logica Imagini
+            let iImg = normHeaders.findIndex(h => h.includes('imagini') || h.includes('images') || h.includes('poza'));
 
-            if(iSku === -1) return alert("Nu gasesc coloana SKU in CSV");
+            if(iSku === -1) return alert("Nu gasesc SKU");
             
             setProducts(rows.slice(1).map((r, k) => {
                 if(r.length <= iSku) return null;
@@ -126,11 +127,8 @@ const Dashboard = () => {
         const next = () => {
             if (stopSignal.current) { setProgress(null); setAutoStart(false); alert("🛑 Oprit."); return; }
             if(i >= queueIds.length) { setProgress(null); alert("✅ Finalizat!"); return; }
-            
             setProgress({cur:i+1, tot:queueIds.length});
-            check(queueIds[i]).then(() => { 
-                i++; setTimeout(next, 2000); 
-            });
+            check(queueIds[i]).then(() => { i++; setTimeout(next, 2000); });
         };
         next();
     };
@@ -156,8 +154,8 @@ const Dashboard = () => {
         <div className="p-6 max-w-[95%] mx-auto">
             <div className="bg-[#1a1a1a] p-6 rounded-xl border border-[#333] mb-6 flex flex-wrap justify-between items-center gap-4">
                 <div>
-                    <h1 className="text-2xl font-bold text-white flex gap-2"><span>📊</span> PriceMonitor v14</h1>
-                    <p className="text-gray-500 text-sm">Direct Search • Fără Google • Selectie Manuală</p>
+                    <h1 className="text-2xl font-bold text-white flex gap-2"><span>📊</span> PriceMonitor v1.4</h1>
+                    <p className="text-gray-500 text-sm">Direct Search • Imagini • Bife</p>
                 </div>
                 
                 <div className="flex items-center gap-3 bg-[#222] p-2 rounded-lg border border-[#444]">
