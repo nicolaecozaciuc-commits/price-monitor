@@ -3,8 +3,7 @@ import logging
 import time
 import random
 import unicodedata
-import json
-from urllib.parse import urlparse, quote_plus
+from urllib.parse import quote_plus
 from flask import Flask, request, jsonify, render_template
 from flask_cors import CORS
 from playwright.sync_api import sync_playwright
@@ -18,363 +17,314 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s | %(message)s', date
 logger = logging.getLogger('PriceMonitor')
 
 # ═══════════════════════════════════════════════════════════════
-# CONFIGURARE SITE-URI DIRECTE (Fallback)
+# SITE-URI PENTRU PRODUSE SANITARE/INSTALAȚII (ACTUALIZAT)
 # ═══════════════════════════════════════════════════════════════
-DIRECT_SITES = {
+COMPETITORS = {
+    # MAGAZINE GENERALE
     'Dedeman': {
-        'search_url': 'https://www.dedeman.ro/ro/cautare?q={}',
+        'url': 'https://www.dedeman.ro/ro/cautare?q={}',
         'card': '.product-item',
-        'name': '.product-title',
         'price': '.product-price',
+        'name': '.product-title',
         'link': 'a.product-title'
     },
     'eMAG': {
-        'search_url': 'https://www.emag.ro/search/{}',
+        'url': 'https://www.emag.ro/search/{}',
         'card': '.card-item',
-        'name': '.card-v2-title',
         'price': '.product-new-price',
+        'name': '.card-v2-title',
         'link': 'a.card-v2-title'
     },
     'Hornbach': {
-        'search_url': 'https://www.hornbach.ro/s/{}',
-        'card': 'article.product',
-        'name': '.product-title',
-        'price': '.price',
+        'url': 'https://www.hornbach.ro/s/{}',
+        'card': 'article',
+        'price': '.price-container',
+        'name': 'h2',
         'link': 'a'
     },
-    'LeroyMerlin': {
-        'search_url': 'https://www.leroymerlin.ro/cautare?query={}',
-        'card': '.product-card',
-        'name': '.product-title',
-        'price': '.price',
-        'link': 'a'
-    },
+    
+    # MAGAZINE SANITARE SPECIALIZATE
     'Romstal': {
-        'search_url': 'https://www.romstal.ro/cautare?q={}',
-        'card': '.product-item',
+        'url': 'https://www.romstal.ro/cautare?q={}',
+        'card': '.product-item-info',
+        'price': '.price',
+        'name': '.product-item-link',
+        'link': '.product-item-link'
+    },
+    'Sanitino': {
+        'url': 'https://www.sanitino.ro/cauta/?q={}',
+        'card': '.product-box',
+        'price': '.price',
         'name': '.product-title',
-        'price': '.product-price',
+        'link': 'a.product-title'
+    },
+    'SanoTerm': {
+        'url': 'https://www.sanoterm.ro/cautare?search={}',
+        'card': '.product-layout',
+        'price': '.price',
+        'name': '.name a',
+        'link': '.name a'
+    },
+    'Novambient': {
+        'url': 'https://www.novambient.ro/catalogsearch/result/?q={}',
+        'card': '.product-item',
+        'price': '.price',
+        'name': '.product-item-link',
+        'link': '.product-item-link'
+    },
+    'Neakaisa': {
+        'url': 'https://neakaisa.ro/cautare?search={}',
+        'card': '.product-thumb',
+        'price': '.price',
+        'name': '.caption a',
+        'link': '.caption a'
+    },
+    'Absulo': {
+        'url': 'https://www.absulo.ro/search/{}',
+        'card': '.product-item',
+        'price': '.price',
+        'name': '.product-title',
         'link': 'a'
     },
     'Obsentum': {
-        'search_url': 'https://obsentum.com/catalogsearch/result/?q={}',
+        'url': 'https://obsentum.com/catalogsearch/result/?q={}',
         'card': '.product-item',
-        'name': '.product-item-link',
         'price': '.price',
+        'name': '.product-item-link',
         'link': '.product-item-link'
     },
     'Sanex': {
-        'search_url': 'https://www.sanex.ro/index.php?route=product/search&search={}',
+        'url': 'https://www.sanex.ro/index.php?route=product/search&search={}',
         'card': '.product-layout',
-        'name': 'h4 a',
         'price': '.price',
+        'name': 'h4 a',
         'link': 'h4 a'
+    },
+    'PicoShop': {
+        'url': 'https://www.picoshop.ro/search?q={}',
+        'card': '.product-item',
+        'price': '.price',
+        'name': '.product-name',
+        'link': 'a'
+    },
+    'InstalShop': {
+        'url': 'https://www.instalshop.ro/catalogsearch/result/?q={}',
+        'card': '.product-item',
+        'price': '.price',
+        'name': '.product-item-link',
+        'link': '.product-item-link'
     }
 }
-
-BLOCKED_DOMAINS = ['facebook.com', 'youtube.com', 'instagram.com', 'twitter.com', 
-                   'linkedin.com', 'pinterest.com', 'olx.ro', 'publi24.ro', 
-                   'wikipedia.org', 'google.', 'bing.', 'duckduckgo.']
-
-USER_AGENTS = [
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
-]
 
 def normalize_text(text):
     if not text: return ""
     text = unicodedata.normalize('NFD', text).encode('ascii', 'ignore').decode()
     return text.lower().strip()
 
-def extract_domain(url):
-    try:
-        parsed = urlparse(url)
-        return parsed.netloc.replace('www.', '')
-    except:
-        return ""
-
-def is_blocked_domain(url):
-    domain = extract_domain(url).lower()
-    return any(blocked in domain for blocked in BLOCKED_DOMAINS)
-
 def clean_price(text):
     if not text: return 0
-    text_lower = str(text).lower()
+    text_lower = text.lower()
     if any(x in text_lower for x in ['luna', 'rata', 'transport', 'livrare', '/luna', 'lei/']):
         return 0
-    matches = re.findall(r'(\d[\d\.\,\s]*)', str(text))
+    matches = re.findall(r'(\d[\d\.\,]*)', text)
     if not matches: return 0
     prices = []
     for m in matches:
-        p = m.replace(' ', '').replace('.', '').replace(',', '.')
+        p = m.replace('.', '').replace(',', '.')
         try:
             val = float(p)
-            if 10 < val < 500000:
+            if val > 10:
                 prices.append(val)
         except:
             pass
-    return min(prices) if prices else 0
+    return max(prices) if prices else 0
 
-def validate_sku_match(sku, page_text):
-    if not sku or len(sku) < 3: return True
-    sku_norm = normalize_text(str(sku))
-    page_norm = normalize_text(str(page_text)[:10000])
-    if re.search(r'\b' + re.escape(sku_norm) + r'\b', page_norm): return True
-    if sku_norm in page_norm: return True
+def validate_match(sku, target_name, found_name):
+    sku = normalize_text(str(sku))
+    found_name = normalize_text(found_name)
+    target_name = normalize_text(target_name)
+    
+    # SKU exact match (prioritate maximă)
+    if len(sku) > 3:
+        # Caută SKU-ul exact
+        if re.search(r'\b' + re.escape(sku) + r'\b', found_name):
+            return True
+        # Sau conținut parțial
+        if sku in found_name:
+            return True
+    
+    # Nume match (backup)
+    stop_words = {'pentru', 'cm', 'alb', 'alba', 'negru', 'cu', 'de', 'si', 'la', 'din', 'x', 'mm', 'set', 'ideal', 'standard'}
+    target_parts = [w for w in target_name.split() if w not in stop_words and len(w) > 2][:5]
+    matches = sum(1 for part in target_parts if part in found_name)
+    return matches >= 2
+
+def safe_goto(page, url, retries=2):
+    for i in range(retries):
+        try:
+            page.goto(url, timeout=25000, wait_until='domcontentloaded')
+            return True
+        except:
+            if i < retries - 1:
+                time.sleep(2)
     return False
 
-def validate_name_match(name, page_text):
-    if not name: return True
-    name_norm = normalize_text(name)
-    page_norm = normalize_text(str(page_text)[:10000])
-    stop_words = {'pentru', 'cm', 'alb', 'alba', 'negru', 'cu', 'de', 'si', 'la', 'din', 'x', 'mm', 'set', 'tip'}
-    keywords = [w for w in name_norm.split() if w not in stop_words and len(w) > 2][:5]
-    if not keywords: return True
-    matches = sum(1 for kw in keywords if kw in page_norm)
-    return matches >= min(2, len(keywords))
-
-# ═══════════════════════════════════════════════════════════════
-# EXTRAGERE PREȚ (JSON-LD > META > CSS)
-# ═══════════════════════════════════════════════════════════════
-
-def extract_price_jsonld(page):
+def extract_price_fallback(page):
+    """Extrage prețul folosind metode alternative"""
+    # Metoda 1: JSON-LD
     try:
+        import json
         scripts = page.locator('script[type="application/ld+json"]').all()
         for script in scripts:
             try:
                 data = json.loads(script.inner_text())
                 items = data if isinstance(data, list) else [data]
                 for item in items:
-                    products = []
                     if item.get('@type') == 'Product':
-                        products.append(item)
-                    elif '@graph' in item:
-                        products.extend([x for x in item['@graph'] if x.get('@type') == 'Product'])
-                    for product in products:
-                        offers = product.get('offers', {})
+                        offers = item.get('offers', {})
                         if isinstance(offers, list):
                             offers = offers[0] if offers else {}
-                        price = offers.get('price') or offers.get('lowPrice') or offers.get('highPrice')
+                        price = offers.get('price') or offers.get('lowPrice')
                         if price:
                             return float(str(price).replace(',', '.'))
             except:
                 continue
     except:
         pass
-    return 0
-
-def extract_price_meta(page):
-    selectors = ['meta[property="product:price:amount"]', 'meta[property="og:price:amount"]', 
-                 'meta[name="price"]', 'meta[itemprop="price"]']
-    for selector in selectors:
-        try:
-            content = page.locator(selector).first.get_attribute('content')
-            if content:
-                price = clean_price(content)
-                if price > 0: return price
-        except:
-            continue
-    return 0
-
-def extract_price_css(page):
-    selectors = ['[data-price]', 'span[itemprop="price"]', '.product-new-price', '.price-new',
-                 '.current-price', '.product-price', '.woocommerce-Price-amount', '.price .amount',
-                 '.special-price .price', '.price-box .price', '.pret-produs', '.price-value', '.main-price']
-    for selector in selectors:
-        try:
-            elements = page.locator(selector).all()
-            for el in elements[:3]:
-                data_price = el.get_attribute('data-price')
-                if data_price:
-                    try: return float(data_price)
-                    except: pass
-                content = el.get_attribute('content')
-                if content:
-                    price = clean_price(content)
-                    if price > 0: return price
-                text = el.inner_text()
-                price = clean_price(text)
-                if price > 0: return price
-        except:
-            continue
-    return 0
-
-def extract_price_from_page(page):
-    price = extract_price_jsonld(page)
-    if price > 0: return price
-    price = extract_price_meta(page)
-    if price > 0: return price
-    price = extract_price_css(page)
-    if price > 0: return price
-    return 0
-
-# ═══════════════════════════════════════════════════════════════
-# DUCKDUCKGO SEARCH
-# ═══════════════════════════════════════════════════════════════
-
-def duckduckgo_search(context, query, max_results=8):
-    urls = []
-    page = None
-    try:
-        page = context.new_page()
-        search_url = f"https://duckduckgo.com/?q={quote_plus(query)}&kl=ro-ro"
-        logger.info(f"   🦆 DuckDuckGo: {query[:50]}...")
-        page.goto(search_url, timeout=25000, wait_until='domcontentloaded')
-        time.sleep(random.uniform(2, 3))
-        
-        results = page.locator('a[data-testid="result-title-a"]').all()
-        if not results:
-            results = page.locator('article a[href^="http"]').all()
-        
-        seen_domains = set()
-        for result in results:
-            try:
-                href = result.get_attribute('href')
-                if not href or is_blocked_domain(href): continue
-                domain = extract_domain(href)
-                if domain not in seen_domains:
-                    seen_domains.add(domain)
-                    urls.append(href)
-                    if len(urls) >= max_results: break
-            except:
-                continue
-        logger.info(f"   📋 DuckDuckGo: {len(urls)} URL-uri")
-    except Exception as e:
-        logger.warning(f"   ⚠️ DuckDuckGo error: {str(e)[:40]}")
-    finally:
-        if page: page.close()
-    return urls
-
-# ═══════════════════════════════════════════════════════════════
-# DIRECT SCRAPING
-# ═══════════════════════════════════════════════════════════════
-
-def scrape_direct_site(context, site_name, config, sku, name):
-    page = None
-    try:
-        page = context.new_page()
-        search_term = sku if len(str(sku)) > 3 else name.split()[0]
-        url = config['search_url'].format(quote_plus(search_term))
-        page.goto(url, timeout=20000, wait_until='domcontentloaded')
-        time.sleep(random.uniform(1.5, 2.5))
-        try: page.click('button:has-text("Accept")', timeout=1500)
-        except: pass
-        
-        cards = page.locator(config['card']).all()
-        for card in cards[:3]:
-            try:
-                card_name = card.locator(config['name']).first.inner_text()
-                if not validate_sku_match(sku, card_name) and not validate_name_match(name, card_name):
-                    continue
-                price_text = card.locator(config['price']).first.inner_text()
-                price = clean_price(price_text)
-                if price <= 0: continue
-                try:
-                    link = card.locator(config['link']).first.get_attribute('href')
-                    if link and not link.startswith('http'):
-                        link = f"https://{extract_domain(url)}{link}"
-                except:
-                    link = url
-                return {'name': site_name, 'price': price, 'url': link or url}
-            except:
-                continue
-    except Exception as e:
-        logger.debug(f"   {site_name}: {str(e)[:30]}")
-    finally:
-        if page: page.close()
-    return None
-
-def scrape_url_for_price(context, url, sku, name):
-    page = None
-    try:
-        page = context.new_page()
-        page.goto(url, timeout=20000, wait_until='domcontentloaded')
-        time.sleep(random.uniform(1, 2))
-        try: page.click('button:has-text("Accept")', timeout=1500)
-        except: pass
-        
-        page_text = page.content()
-        if not validate_sku_match(sku, page_text):
-            if not validate_name_match(name, page_text):
-                return None
-        
-        price = extract_price_from_page(page)
-        if price > 0:
-            return {'name': extract_domain(url), 'price': price, 'url': url}
-    except Exception as e:
-        logger.debug(f"   Error {url[:30]}: {str(e)[:30]}")
-    finally:
-        if page: page.close()
-    return None
-
-# ═══════════════════════════════════════════════════════════════
-# SCANARE PRINCIPALĂ
-# ═══════════════════════════════════════════════════════════════
-
-def scan_product(sku, name, your_price=0):
-    found = []
-    sku = str(sku).strip()
-    name = str(name).strip()
-    logger.info(f"🔎 Scanare: {sku} - {name[:40]}...")
     
+    # Metoda 2: Selectoare generice
+    generic_selectors = [
+        '.price', '.product-price', '.current-price', '.special-price',
+        '[data-price]', 'span[itemprop="price"]', '.woocommerce-Price-amount'
+    ]
+    for selector in generic_selectors:
+        try:
+            el = page.locator(selector).first
+            text = el.inner_text()
+            price = clean_price(text)
+            if price > 0:
+                return price
+            # Check data-price attribute
+            data_price = el.get_attribute('data-price')
+            if data_price:
+                return float(data_price)
+        except:
+            continue
+    
+    return 0
+
+def scan_direct(sku, name, your_price=0):
+    found = []
+    search_term = sku if len(str(sku)) > 3 else name.split()[0] if name else sku
+    logger.info(f"🔎 Caut: {search_term} ({name[:30]}...)")
+
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         context = browser.new_context(
-            user_agent=random.choice(USER_AGENTS),
-            viewport={'width': 1920, 'height': 1080},
-            locale='ro-RO'
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+            viewport={'width': 1920, 'height': 1080}
         )
-        
-        # ETAPA 1: DuckDuckGo Discovery
-        discovery_urls = []
-        if len(sku) > 3:
-            urls = duckduckgo_search(context, f'{sku} pret site:.ro', max_results=5)
-            discovery_urls.extend(urls)
-            time.sleep(random.uniform(2, 3))
-        
-        if len(discovery_urls) < 3:
-            name_short = ' '.join(name.split()[:4])
-            urls = duckduckgo_search(context, f'{name_short} pret', max_results=5)
-            for u in urls:
-                if extract_domain(u) not in [extract_domain(x) for x in discovery_urls]:
-                    discovery_urls.append(u)
-        
-        logger.info(f"   🌐 Discovery: {len(discovery_urls)} URL-uri")
-        
-        for url in discovery_urls[:6]:
-            result = scrape_url_for_price(context, url, sku, name)
-            if result:
-                if not any(r['name'] == result['name'] for r in found):
-                    found.append(result)
-                    logger.info(f"   ✅ {result['name']}: {result['price']} Lei")
-            time.sleep(random.uniform(0.5, 1))
-        
-        # ETAPA 2: Direct Scraping Fallback
-        if len(found) < 3:
-            logger.info(f"   🔄 Fallback: Direct scraping...")
-            for site_name, config in DIRECT_SITES.items():
-                if any(site_name.lower() in r['name'].lower() for r in found):
+
+        for site, cfg in COMPETITORS.items():
+            page = None
+            try:
+                page = context.new_page()
+                url = cfg['url'].format(quote_plus(search_term))
+                
+                if not safe_goto(page, url):
+                    logger.warning(f"   ⚠️ {site}: timeout")
+                    page.close()
                     continue
-                result = scrape_direct_site(context, site_name, config, sku, name)
-                if result:
-                    found.append(result)
-                    logger.info(f"   ✅ {result['name']}: {result['price']} Lei")
-                time.sleep(random.uniform(1, 2))
-                if len(found) >= 5: break
-        
+
+                # Accept cookies
+                try:
+                    page.click('button:has-text("Accept")', timeout=1500)
+                except:
+                    try:
+                        page.click('button:has-text("Acceptă")', timeout=1000)
+                    except:
+                        pass
+                
+                time.sleep(random.uniform(1.5, 2.5))
+
+                # Găsește carduri
+                cards = page.locator(cfg['card']).all()
+                
+                if len(cards) == 0:
+                    logger.info(f"   ⚪ {site}: 0 carduri")
+                    page.close()
+                    continue
+                
+                logger.info(f"   🔍 {site}: {len(cards)} carduri")
+                
+                best = None
+                for card in cards[:5]:
+                    try:
+                        # Extrage numele produsului
+                        try:
+                            raw_name = card.locator(cfg['name']).first.inner_text()
+                        except:
+                            raw_name = card.inner_text()[:100]
+                        
+                        # Validează match
+                        if not validate_match(sku, name, raw_name):
+                            continue
+                        
+                        # Extrage prețul
+                        try:
+                            raw_price = card.locator(cfg['price']).first.inner_text()
+                            price = clean_price(raw_price)
+                        except:
+                            price = 0
+                        
+                        # Fallback pentru preț
+                        if price <= 0:
+                            try:
+                                price_el = card.locator('.price, [class*="price"]').first
+                                price = clean_price(price_el.inner_text())
+                            except:
+                                pass
+                        
+                        if price > 0:
+                            # Extrage link
+                            try:
+                                href = card.locator(cfg['link']).first.get_attribute('href')
+                                if href and not href.startswith('http'):
+                                    # Construiește URL complet
+                                    from urllib.parse import urlparse
+                                    base = urlparse(url)
+                                    href = f"{base.scheme}://{base.netloc}{href}"
+                                link = href if href else url
+                            except:
+                                link = url
+
+                            if best is None or price < best['price']:
+                                best = {"name": site, "price": price, "url": link}
+                                logger.info(f"      ✓ Match: {price} Lei")
+                    except Exception as e:
+                        continue
+                
+                if best:
+                    # Calcul diferență %
+                    if your_price > 0:
+                        diff = ((best['price'] - your_price) / your_price) * 100
+                        best['diff'] = round(diff, 1)
+                    else:
+                        best['diff'] = 0
+                    
+                    found.append(best)
+                    logger.info(f"   ✅ {site}: {best['price']} Lei ({best['diff']:+.1f}%)")
+                    
+            except Exception as e:
+                logger.error(f"   ❌ {site}: {str(e)[:40]}")
+            finally:
+                if page:
+                    page.close()
+
         browser.close()
-    
-    # Calcul diferență %
-    for item in found:
-        if your_price > 0:
-            diff = ((item['price'] - your_price) / your_price) * 100
-            item['diff'] = round(diff, 1)
-        else:
-            item['diff'] = 0
-    
+
     found.sort(key=lambda x: x['price'])
-    logger.info(f"   📊 Total: {len(found)} rezultate")
+    logger.info(f"📊 Total: {len(found)} rezultate")
     return found[:5]
 
 @app.route('/')
@@ -383,13 +333,11 @@ def index():
 
 @app.route('/api/check', methods=['POST'])
 def api_check():
-    data = request.json
-    sku = data.get('sku', '')
-    name = data.get('name', '')
-    your_price = float(data.get('price', 0) or 0)
-    results = scan_product(sku, name, your_price)
+    d = request.json
+    your_price = float(d.get('price', 0) or 0)
+    results = scan_direct(d.get('sku', ''), d.get('name', ''), your_price)
     return jsonify({"status": "success", "competitors": results})
 
 if __name__ == '__main__':
-    logger.info("🚀 PriceMonitor v2.1 (DuckDuckGo + Direct + JSON-LD) pornit pe :8080")
+    logger.info("🚀 PriceMonitor v2.3 (13 site-uri sanitare) pornit pe :8080")
     app.run(host='0.0.0.0', port=8080)
