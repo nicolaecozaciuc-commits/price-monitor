@@ -417,8 +417,17 @@ def scan_product(sku, name, your_price=0):
         
         browser.close()
     
+    # Calculează diff pentru fiecare rezultat
     for r in found:
         r['diff'] = round(((r['price'] - your_price) / your_price) * 100, 1) if your_price > 0 else 0
+    
+    # FILTRU: păstrează doar rezultatele în intervalul ±30% față de prețul nostru
+    if your_price > 0:
+        before_filter = len(found)
+        found = [r for r in found if -30 <= r['diff'] <= 30]
+        filtered_count = before_filter - len(found)
+        if filtered_count > 0:
+            logger.info(f"   🔻 Filtrat {filtered_count} outliers (±30%)")
     
     found.sort(key=lambda x: x['price'])
     return found[:5]
@@ -443,5 +452,5 @@ def get_debug(filename):
     return "Not found", 404
 
 if __name__ == '__main__':
-    logger.info("🚀 PriceMonitor v9.9 (Google SKU + Denumire) pe :8080")
+    logger.info("🚀 PriceMonitor v10.0 (±30% Filter) pe :8080")
     app.run(host='0.0.0.0', port=8080)
