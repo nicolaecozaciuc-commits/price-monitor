@@ -71,6 +71,51 @@ def validate_dimensions(sku_name, snippet_text, threshold=0.7):
         'reason': f"Match {len(matches)}/{len(sku_dims_norm)}" if is_valid else f"Mismatch {len(matches)}/{len(sku_dims_norm)}"
     }
 
+# ============ SPECIAL EXTRACTORS (V10.8) ============
+def extract_foglia_price(text):
+    """Foglia: PREȚ RON · In stock"""
+    match = re.search(r'([\d.,]+)\s*RON\s*[·●]\s*(?:●\s*)?[ÎI]n stoc', text, re.IGNORECASE)
+    if match:
+        price = clean_price(match.group(1))
+        if price > 0:
+            return price
+    match = re.search(r'([\d.,]+)\s*RON[^·]*[ÎI]n stoc', text, re.IGNORECASE)
+    if match:
+        price = clean_price(match.group(1))
+        if price > 0:
+            return price
+    return None
+
+def extract_bagno_price(text):
+    """Bagno.ro: max price (main product)"""
+    prices = []
+    matches = re.finditer(r'([\d.,]+)\s*(?:RON|Lei)', text, re.IGNORECASE)
+    for match in matches:
+        price = clean_price(match.group(1))
+        if price > 0:
+            prices.append(price)
+    return max(prices) if prices else None
+
+def extract_germanquality_price(text):
+    """Germanquality.ro: max price (main product)"""
+    prices = []
+    matches = re.finditer(r'([\d.,]+)\s*(?:RON|Lei)', text, re.IGNORECASE)
+    for match in matches:
+        price = clean_price(match.group(1))
+        if price > 0:
+            prices.append(price)
+    return max(prices) if prices else None
+
+def extract_neakaisa_price(text):
+    """Neakaisa: max price (main product)"""
+    prices = []
+    matches = re.finditer(r'([\d.,]+)\s*(?:RON|Lei)', text, re.IGNORECASE)
+    for match in matches:
+        price = clean_price(match.group(1))
+        if price > 0:
+            prices.append(price)
+    return max(prices) if prices else None
+
 BLOCKED = ['google', 'bing', 'microsoft', 'facebook', 'youtube', 'doarbai', 'termohabitat', 'wikipedia', 'amazon', 'ebay', 'compari.ro']
 
 SEARCH_URLS = {
@@ -137,130 +182,15 @@ def extract_prices_from_text(text):
             prices.append(p)
     return prices[:10]
 
-
-# ============ EXTRACȚIE SPECIFICĂ FOGLIA ============
-def extract_foglia_price(text):
-    """
-    Foglia are format specific: PREȚ RON · In stock
-    Prețul principal e cel mare, urmat de "In stock"
-    """
-    # Pattern: preț RON urmat de "· În stoc" sau "· In stock" (română sau engleză)
-    match = re.search(r'([\d.,]+)\s*RON\s*[·●]\s*(?:●\s*)?[ÎI]n stoc', text, re.IGNORECASE)
-    if match:
-        price = clean_price(match.group(1))
-        if price > 0:
-            return price
-    
-    # Fallback: preț RON urmat de "În stoc" (fără ·)
-    match = re.search(r'([\d.,]+)\s*RON[^·]*[ÎI]n stoc', text, re.IGNORECASE)
-    if match:
-        price = clean_price(match.group(1))
-        if price > 0:
-            return price
-    
-    return None
-
-
-# ============ EXTRACȚIE SPECIFICĂ NEAKAISA ============
-def extract_neakaisa_price(text):
-    """
-    Neakaisa: caută cel mai mare preț RON (prețul principal)
-    """
-    prices = []
-    matches = re.finditer(r'([\d.,]+)\s*(?:RON|Lei)', text, re.IGNORECASE)
-    
-    for match in matches:
-        price = clean_price(match.group(1))
-        if price > 0:
-            prices.append(price)
-    
-    # Returnează cel mai mare preț
-    if prices:
-        return max(prices)
-    
-    return None
-
-
-# ============ EXTRACȚIE SPECIFICĂ GERMANQUALITY ============
-def extract_germanquality_price(text):
-    """
-    Germanquality.ro: caută cel mai mare preț (prețul principal)
-    Format: PREȚ RON la început de linie/snippet
-    """
-    prices = []
-    matches = re.finditer(r'([\d.,]+)\s*(?:RON|Lei)', text, re.IGNORECASE)
-    
-    for match in matches:
-        price = clean_price(match.group(1))
-        if price > 0:
-            prices.append(price)
-    
-    # Returnează cel mai mare preț (prețul principal)
-    if prices:
-        return max(prices)
-    
-    return None
-
-
-# ============ EXTRACȚIE SPECIFICĂ BAGNO (V10.8) ============
-def extract_bagno_price(text):
-    """
-    Bagno.ro: caută cel mai mare preț (prețul principal, nu variante)
-    Format: PREȚ RON la început de linie/snippet
-    """
-    # Caută toate prețurile din text
-    prices = []
-    matches = re.finditer(r'([\d.,]+)\s*(?:RON|Lei)', text, re.IGNORECASE)
-    
-    for match in matches:
-        price = clean_price(match.group(1))
-        if price > 0:
-            prices.append(price)
-    
-    # Returnează cel mai mare preț (prețul principal)
-    if prices:
-        return max(prices)
-    
-    return None
-
-
 # ============ METODA 3: EXTRACȚIE HTML STRUCTURAT ============
 def extract_from_google_html(page, sku):
-    """
-    Extrage prețuri din structura HTML a paginii Google.
-    Caută în sponsored products și rezultate organice.
-    """
+    """Extrage prețuri din structura HTML a paginii Google"""
     results = []
-    sku_lower = sku.lower()
-    
     try:
         html_content = page.content()
-        
-        # Salvează HTML pentru debug
         with open(f"{DEBUG_DIR}/google_{sku}_html.html", 'w', encoding='utf-8') as f:
             f.write(html_content)
         
-        # Pattern pentru prețuri cu domeniu în apropiere
-        # Format: "13.200,00 RON" sau "13,200.00 RON" urmat/precedat de ".ro"
-        
-        # Caută toate combinațiile de preț + domain din HTML
-        # Pattern: domain.ro ... preț RON sau preț RON ... domain.ro
-        
-        # Metodă: găsește toate link-urile .ro și prețurile din vecinătate
-        
-        # Extragem blocuri care conțin și .ro și RON/Lei
-        blocks = re.findall(r'[^<>]{0,500}?([a-z0-9-]+\.ro)[^<>]{0,500}', html_content.lower())
-        
-        for block in blocks:
-            domain = block
-            if not domain or len(domain) < 5 or any(b in domain for b in BLOCKED):
-                continue
-            
-            # Verifică duplicat
-            if any(r['domain'] == domain for r in results):
-                continue
-        
-        # Metodă alternativă: caută pattern "PREȚ RON" cu context
         price_patterns = re.finditer(
             r'([a-z0-9-]+\.ro)[^<>]{0,200}?([\d.,]+)\s*(?:RON|Lei)',
             html_content,
@@ -278,20 +208,14 @@ def extract_from_google_html(page, sku):
             if any(r['domain'] == domain for r in results):
                 continue
             
-            # Verifică context pentru transport
             context = match.group(0).lower()
             transport_words = ['delivery', 'transport', 'livrare', 'shipping', 'expediere', ' sh']
             is_transport = any(tw in context for tw in transport_words)
             
             if not is_transport:
-                results.append({
-                    'domain': domain,
-                    'price': price,
-                    'source': 'Google HTML'
-                })
+                results.append({'domain': domain, 'price': price, 'source': 'Google HTML'})
                 logger.info(f"      🟠 {domain}: {price} Lei (HTML)")
         
-        # Pattern invers: preț apoi domain
         price_patterns_rev = re.finditer(
             r'([\d.,]+)\s*(?:RON|Lei)[^<>]{0,200}?([a-z0-9-]+\.ro)',
             html_content,
@@ -314,11 +238,7 @@ def extract_from_google_html(page, sku):
             is_transport = any(tw in context for tw in transport_words)
             
             if not is_transport:
-                results.append({
-                    'domain': domain,
-                    'price': price,
-                    'source': 'Google HTML'
-                })
+                results.append({'domain': domain, 'price': price, 'source': 'Google HTML'})
                 logger.info(f"      🟠 {domain}: {price} Lei (HTML)")
         
         if results:
@@ -329,16 +249,8 @@ def extract_from_google_html(page, sku):
     
     return results
 
-
-
 def google_stealth_search(page, query, sku_for_match=None, sku_name=None):
-    """
-    Google caută în tăcere, face 'poză' la prima pagină.
-    Returnează lista de {domain, price} găsite în snippets.
-    query = ce căutăm (SKU sau denumire)
-    sku_for_match = SKU-ul pentru salvarea fișierelor debug (opțional)
-    sku_name = product name pentru validare dimensiuni (V10.7)
-    """
+    """Google search cu Metoda 1 (line), Metoda 2 (bloc), Metoda 3 (HTML)"""
     results = []
     search_query = f"{query} pret RON"
     url = f"https://www.google.com/search?q={quote_plus(search_query)}&hl=ro&gl=ro"
@@ -348,7 +260,6 @@ def google_stealth_search(page, query, sku_for_match=None, sku_name=None):
         page.goto(url, timeout=15000, wait_until='domcontentloaded')
         time.sleep(2)
         
-        # Accept cookies Google
         try:
             page.click('button:has-text("Accept all")', timeout=2000)
         except:
@@ -358,197 +269,125 @@ def google_stealth_search(page, query, sku_for_match=None, sku_name=None):
                 pass
         
         time.sleep(1)
-        
-        # Salvează "poza"
         page.screenshot(path=f"{DEBUG_DIR}/google_{file_suffix}.png")
         
-        # Extragem textul întregii pagini
         body_text = page.locator('body').inner_text()
-        
-        # Salvează și textul
         with open(f"{DEBUG_DIR}/google_{file_suffix}.txt", 'w', encoding='utf-8') as f:
             f.write(body_text)
         
-        # Căutăm blocuri cu preț
         lines = body_text.split('\n')
         current_domain = None
         
         for i, line in enumerate(lines):
             line_lower = line.lower()
             
-            # Detectează domain .ro
             domain_match = re.search(r'(?:https?://)?(?:www\.)?([a-z0-9-]+\.ro)', line_lower)
             if domain_match:
                 d = domain_match.group(1)
                 if len(d) > 4 and not any(b in d for b in BLOCKED):
                     current_domain = d
             
-            # Dacă linia conține query (sau parte din el) și avem domain
             query_lower = query.lower()
-            # Căutăm fie query-ul complet, fie SKU-ul dacă e prezent
             has_match = query_lower in line_lower
             if not has_match and len(query.split()) > 1:
-                # Pentru query-uri lungi, verificăm dacă măcar 2 cuvinte se potrivesc
                 words = query_lower.split()
                 matches = sum(1 for w in words if w in line_lower and len(w) > 3)
                 has_match = matches >= 2
             
             if has_match and current_domain:
-                # Caută TOATE prețurile în context
                 context = ' '.join(lines[max(0,i-2):min(len(lines),i+3)])
                 
-                # SPECIAL GERMANQUALITY (V10.8): extract fără condiție SKU
+                # SPECIAL GERMANQUALITY (V10.8)
                 if current_domain == 'germanquality.ro':
                     gq_price = extract_germanquality_price(context)
                     if gq_price and gq_price > 0:
                         if not any(r['domain'] == current_domain for r in results):
-                            # V10.7: VALIDARE DIMENSIUNI
                             if sku_name:
                                 dim_check = validate_dimensions(sku_name, context)
                                 if not dim_check['valid']:
                                     logger.info(f"      🔴 {current_domain}: {gq_price} Lei - REJECTED (dims: {dim_check['reason']})")
                                     continue
-                            
-                            results.append({
-                                'domain': current_domain,
-                                'price': gq_price,
-                                'source': 'Google SERP (GermanQuality)'
-                            })
+                            results.append({'domain': current_domain, 'price': gq_price, 'source': 'Google SERP (GQ)'})
                             logger.info(f"      🟠 {current_domain}: {gq_price} Lei (GQ)")
                         continue
                 
-                # SPECIAL FOGLIA: folosește metoda specifică
+                # SPECIAL FOGLIA
                 if current_domain == 'foglia.ro':
                     foglia_price = extract_foglia_price(context)
                     if foglia_price and foglia_price > 0:
                         if not any(r['domain'] == current_domain for r in results):
-                            # V10.7: VALIDARE DIMENSIUNI
                             if sku_name:
                                 dim_check = validate_dimensions(sku_name, context)
                                 if not dim_check['valid']:
                                     logger.info(f"      🔴 {current_domain}: {foglia_price} Lei - REJECTED (dims: {dim_check['reason']})")
                                     continue
-                            
-                            results.append({
-                                'domain': current_domain,
-                                'price': foglia_price,
-                                'source': 'Google SERP (Foglia)'
-                            })
+                            results.append({'domain': current_domain, 'price': foglia_price, 'source': 'Google SERP (Foglia)'})
                             logger.info(f"      🟣 {current_domain}: {foglia_price} Lei (Foglia)")
                         continue
                 
-                # SPECIAL BAGNO (V10.8): folosește metoda specifică
+                # SPECIAL BAGNO
                 if current_domain == 'bagno.ro':
                     bagno_price = extract_bagno_price(context)
                     if bagno_price and bagno_price > 0:
                         if not any(r['domain'] == current_domain for r in results):
-                            # V10.7: VALIDARE DIMENSIUNI
                             if sku_name:
                                 dim_check = validate_dimensions(sku_name, context)
                                 if not dim_check['valid']:
                                     logger.info(f"      🔴 {current_domain}: {bagno_price} Lei - REJECTED (dims: {dim_check['reason']})")
                                     continue
-                            
-                            results.append({
-                                'domain': current_domain,
-                                'price': bagno_price,
-                                'source': 'Google SERP (Bagno)'
-                            })
+                            results.append({'domain': current_domain, 'price': bagno_price, 'source': 'Google SERP (Bagno)'})
                             logger.info(f"      🟡 {current_domain}: {bagno_price} Lei (Bagno)")
                         continue
                 
-                # SPECIAL GERMANQUALITY (V10.8): folosește metoda specifică
-                if current_domain == 'germanquality.ro':
-                    gq_price = extract_germanquality_price(context)
-                    if gq_price and gq_price > 0:
-                        if not any(r['domain'] == current_domain for r in results):
-                            # V10.7: VALIDARE DIMENSIUNI
-                            if sku_name:
-                                dim_check = validate_dimensions(sku_name, context)
-                                if not dim_check['valid']:
-                                    logger.info(f"      🔴 {current_domain}: {gq_price} Lei - REJECTED (dims: {dim_check['reason']})")
-                                    continue
-                            
-                            results.append({
-                                'domain': current_domain,
-                                'price': gq_price,
-                                'source': 'Google SERP (GermanQuality)'
-                            })
-                            logger.info(f"      🟠 {current_domain}: {gq_price} Lei (GQ)")
-                        continue
-                
-                # SPECIAL NEAKAISA - updated (V10.8): uses max price
+                # SPECIAL NEAKAISA
                 if current_domain == 'neakaisa.ro':
                     neakaisa_price = extract_neakaisa_price(context)
                     if neakaisa_price and neakaisa_price > 0:
                         if not any(r['domain'] == current_domain for r in results):
-                            # V10.7: VALIDARE DIMENSIUNI
                             if sku_name:
                                 dim_check = validate_dimensions(sku_name, context)
                                 if not dim_check['valid']:
                                     logger.info(f"      🔴 {current_domain}: {neakaisa_price} Lei - REJECTED (dims: {dim_check['reason']})")
                                     continue
-                            
-                            results.append({
-                                'domain': current_domain,
-                                'price': neakaisa_price,
-                                'source': 'Google SERP (Neakaisa)'
-                            })
+                            results.append({'domain': current_domain, 'price': neakaisa_price, 'source': 'Google SERP (Neakaisa)'})
                             logger.info(f"      🟤 {current_domain}: {neakaisa_price} Lei (Neakaisa)")
                         continue
                 
-                # Găsește prețuri CU contextul lor (pentru a detecta transport)
+                # Generic extraction
                 price_patterns = re.finditer(r'([\d.,]+)\s*(?:RON|Lei|lei)', context, re.IGNORECASE)
-                
                 valid_prices = []
                 for pm in price_patterns:
                     price_value = clean_price(pm.group(1))
                     if price_value <= 0:
                         continue
-                    
-                    # Verifică dacă e preț de transport (20 caractere înainte și după)
                     start = max(0, pm.start() - 25)
                     end = min(len(context), pm.end() + 15)
                     price_context = context[start:end].lower()
-                    
                     transport_words = ['delivery', 'transport', 'livrare', 'shipping', 'expediere']
                     is_transport = any(tw in price_context for tw in transport_words)
-                    
                     if not is_transport:
                         valid_prices.append(price_value)
                 
-                # Ia cel mai MIC preț care NU e transport
                 if valid_prices:
                     price = min(valid_prices)
-                    
-                    # V10.7: VALIDARE DIMENSIUNI
                     if sku_name:
                         dim_check = validate_dimensions(sku_name, context)
                         if not dim_check['valid']:
                             logger.info(f"      🔴 {current_domain}: {price} Lei - REJECTED (dims: {dim_check['reason']})")
                             continue
-                    
-                    # Verifică să nu fie duplicat
                     if not any(r['domain'] == current_domain for r in results):
-                        results.append({
-                            'domain': current_domain,
-                            'price': price,
-                            'source': 'Google SERP'
-                        })
+                        results.append({'domain': current_domain, 'price': price, 'source': 'Google SERP'})
                         logger.info(f"      🟢 {current_domain}: {price} Lei")
         
         logger.info(f"   📸 Google: {len(results)} cu preț")
         
-        # ============ METODA 2: CĂUTARE PE BLOC (5-6 linii) ============
-        # Pentru site-urile ratate de metoda 1 (SKU pe altă linie decât domain)
+        # ============ METODA 2: BLOC ============
         logger.info(f"   🔍 Metoda 2: bloc...")
         current_domain = None
         domain_line = -1
         
         for i, line in enumerate(lines):
             line_lower = line.lower()
-            
-            # Detectează domain .ro
             domain_match = re.search(r'(?:https?://)?(?:www\.)?([a-z0-9-]+\.ro)', line_lower)
             if domain_match:
                 d = domain_match.group(1)
@@ -556,17 +395,15 @@ def google_stealth_search(page, query, sku_for_match=None, sku_name=None):
                     current_domain = d
                     domain_line = i
             
-            # Dacă avem domain și suntem în range-ul de 6 linii
-            if current_domain and domain_line >= 0 and i <= domain_line + 6:
-                # SPECIAL GERMANQUALITY (V10.8): extract fără condiție SKU
-                if current_domain == 'germanquality.ro' and not any(r['domain'] == current_domain for r in results):
+            # DIRECT GERMANQUALITY extraction în Metoda 2 (fără condiție SKU)
+            if current_domain and current_domain == 'germanquality.ro' and domain_line >= 0 and i <= domain_line + 6:
+                if not any(r['domain'] == current_domain for r in results):
                     block_start = domain_line
                     block_end = min(len(lines), domain_line + 7)
                     block_text = ' '.join(lines[block_start:block_end])
                     
                     gq_price = extract_germanquality_price(block_text)
                     if gq_price and gq_price > 0:
-                        # V10.7: VALIDARE DIMENSIUNI
                         if sku_name:
                             dim_check = validate_dimensions(sku_name, block_text)
                             if not dim_check['valid']:
@@ -574,34 +411,26 @@ def google_stealth_search(page, query, sku_for_match=None, sku_name=None):
                                 current_domain = None
                                 domain_line = -1
                                 continue
-                        
-                        results.append({
-                            'domain': current_domain,
-                            'price': gq_price,
-                            'source': 'Google SERP (GermanQuality)'
-                        })
+                        results.append({'domain': current_domain, 'price': gq_price, 'source': 'Google SERP (GQ)'})
                         logger.info(f"      🟠 {current_domain}: {gq_price} Lei (GQ)")
                         current_domain = None
                         domain_line = -1
                         continue
-                
-                # Verifică dacă SKU apare în această linie
+            
+            if current_domain and domain_line >= 0 and i <= domain_line + 6:
                 query_lower = query.lower()
                 if query_lower in line_lower:
-                    # Verifică să nu fie deja în rezultate
                     if any(r['domain'] == current_domain for r in results):
                         continue
                     
-                    # Caută preț în blocul domain_line până la domain_line+6
                     block_start = domain_line
                     block_end = min(len(lines), domain_line + 7)
                     block_text = ' '.join(lines[block_start:block_end])
                     
-                    # SPECIAL FOGLIA: folosește metoda specifică
+                    # FOGLIA
                     if current_domain == 'foglia.ro':
                         foglia_price = extract_foglia_price(block_text)
                         if foglia_price and foglia_price > 0:
-                            # V10.7: VALIDARE DIMENSIUNI
                             if sku_name:
                                 dim_check = validate_dimensions(sku_name, block_text)
                                 if not dim_check['valid']:
@@ -609,22 +438,16 @@ def google_stealth_search(page, query, sku_for_match=None, sku_name=None):
                                     current_domain = None
                                     domain_line = -1
                                     continue
-                            
-                            results.append({
-                                'domain': current_domain,
-                                'price': foglia_price,
-                                'source': 'Google SERP (Foglia)'
-                            })
+                            results.append({'domain': current_domain, 'price': foglia_price, 'source': 'Google SERP (Foglia)'})
                             logger.info(f"      🟣 {current_domain}: {foglia_price} Lei (Foglia)")
                             current_domain = None
                             domain_line = -1
                             continue
                     
-                    # SPECIAL BAGNO (V10.8): folosește metoda specifică
+                    # BAGNO
                     if current_domain == 'bagno.ro':
                         bagno_price = extract_bagno_price(block_text)
                         if bagno_price and bagno_price > 0:
-                            # V10.7: VALIDARE DIMENSIUNI
                             if sku_name:
                                 dim_check = validate_dimensions(sku_name, block_text)
                                 if not dim_check['valid']:
@@ -632,45 +455,16 @@ def google_stealth_search(page, query, sku_for_match=None, sku_name=None):
                                     current_domain = None
                                     domain_line = -1
                                     continue
-                            
-                            results.append({
-                                'domain': current_domain,
-                                'price': bagno_price,
-                                'source': 'Google SERP (Bagno)'
-                            })
+                            results.append({'domain': current_domain, 'price': bagno_price, 'source': 'Google SERP (Bagno)'})
                             logger.info(f"      🟡 {current_domain}: {bagno_price} Lei (Bagno)")
                             current_domain = None
                             domain_line = -1
                             continue
                     
-                    # SPECIAL GERMANQUALITY (V10.8): folosește metoda specifică
-                    if current_domain == 'germanquality.ro':
-                        gq_price = extract_germanquality_price(block_text)
-                        if gq_price and gq_price > 0:
-                            # V10.7: VALIDARE DIMENSIUNI
-                            if sku_name:
-                                dim_check = validate_dimensions(sku_name, block_text)
-                                if not dim_check['valid']:
-                                    logger.info(f"      🔴 {current_domain}: {gq_price} Lei - REJECTED (dims: {dim_check['reason']})")
-                                    current_domain = None
-                                    domain_line = -1
-                                    continue
-                            
-                            results.append({
-                                'domain': current_domain,
-                                'price': gq_price,
-                                'source': 'Google SERP (GermanQuality)'
-                            })
-                            logger.info(f"      🟠 {current_domain}: {gq_price} Lei (GQ)")
-                            current_domain = None
-                            domain_line = -1
-                            continue
-                    
-                    # SPECIAL NEAKAISA - updated (V10.8): uses max price
+                    # NEAKAISA
                     if current_domain == 'neakaisa.ro':
                         neakaisa_price = extract_neakaisa_price(block_text)
                         if neakaisa_price and neakaisa_price > 0:
-                            # V10.7: VALIDARE DIMENSIUNI
                             if sku_name:
                                 dim_check = validate_dimensions(sku_name, block_text)
                                 if not dim_check['valid']:
@@ -678,43 +472,29 @@ def google_stealth_search(page, query, sku_for_match=None, sku_name=None):
                                     current_domain = None
                                     domain_line = -1
                                     continue
-                            
-                            results.append({
-                                'domain': current_domain,
-                                'price': neakaisa_price,
-                                'source': 'Google SERP (Neakaisa)'
-                            })
+                            results.append({'domain': current_domain, 'price': neakaisa_price, 'source': 'Google SERP (Neakaisa)'})
                             logger.info(f"      🟤 {current_domain}: {neakaisa_price} Lei (Neakaisa)")
                             current_domain = None
                             domain_line = -1
                             continue
                     
-                    # Găsește prețuri CU contextul lor
+                    # Generic bloc extraction
                     price_patterns = re.finditer(r'([\d.,]+)\s*(?:RON|Lei|lei)', block_text, re.IGNORECASE)
-                    
                     valid_prices = []
                     for pm in price_patterns:
                         price_value = clean_price(pm.group(1))
                         if price_value <= 0:
                             continue
-                        
-                        # Verifică dacă e preț de transport
                         start = max(0, pm.start() - 25)
                         end = min(len(block_text), pm.end() + 15)
                         price_context = block_text[start:end].lower()
-                        
                         transport_words = ['delivery', 'transport', 'livrare', 'shipping', 'expediere']
                         is_transport = any(tw in price_context for tw in transport_words)
-                        
                         if not is_transport:
                             valid_prices.append(price_value)
                     
                     if valid_prices:
-                        # Pentru produse scumpe, ia primul preț valid (nu min)
-                        # min() poate lua prețuri de alte produse din snippet
                         price = valid_prices[0]
-                        
-                        # V10.7: VALIDARE DIMENSIUNI
                         if sku_name:
                             dim_check = validate_dimensions(sku_name, block_text)
                             if not dim_check['valid']:
@@ -722,21 +502,15 @@ def google_stealth_search(page, query, sku_for_match=None, sku_name=None):
                                 current_domain = None
                                 domain_line = -1
                                 continue
-                        
-                        results.append({
-                            'domain': current_domain,
-                            'price': price,
-                            'source': 'Google SERP (bloc)'
-                        })
+                        results.append({'domain': current_domain, 'price': price, 'source': 'Google SERP (bloc)'})
                         logger.info(f"      🔵 {current_domain}: {price} Lei (bloc)")
                     
-                    # Reset domain după ce am procesat
                     current_domain = None
                     domain_line = -1
         
         logger.info(f"   📸 Total după bloc: {len(results)}")
         
-        # ========== METODA 3: HTML STRUCTURAT ==========
+        # ========== METODA 3: HTML ==========
         html_results = extract_from_google_html(page, query)
         for r in html_results:
             if not any(existing['domain'] == r['domain'] for existing in results):
@@ -750,19 +524,15 @@ def google_stealth_search(page, query, sku_for_match=None, sku_name=None):
     
     return results
 
-
-# ============ BING FALLBACK - PASUL 2 ============
 def get_domains_from_bing(page, sku):
-    """Bing ca fallback - extrage domenii și prețuri"""
+    """Bing fallback"""
     results = []
-    
     try:
         for block in page.locator('.b_algo').all()[:15]:
             try:
                 text = block.inner_text()
                 text_lower = text.lower()
                 
-                # Extrage domain
                 domain = None
                 for line in text.split('\n')[:3]:
                     match = re.search(r'(?:https?://)?(?:www\.)?([a-z0-9-]+\.ro)', line.lower())
@@ -774,26 +544,16 @@ def get_domains_from_bing(page, sku):
                 
                 if not domain:
                     continue
-                
-                # Verifică duplicat
                 if any(r['domain'] == domain for r in results):
                     continue
                 
-                # Verifică dacă SKU apare
                 has_sku = sku.lower() in text_lower
-                
-                # Extrage preț
                 price = 0
                 price_match = re.search(r'([\d.,]+)\s*(?:RON|Lei|lei)', text)
                 if price_match:
                     price = clean_price(price_match.group(1))
                 
-                results.append({
-                    'domain': domain,
-                    'price': price,
-                    'has_sku': has_sku,
-                    'source': 'Bing SERP'
-                })
+                results.append({'domain': domain, 'price': price, 'has_sku': has_sku, 'source': 'Bing SERP'})
                 
                 if price > 0 and has_sku:
                     logger.info(f"      🔵 {domain}: {price} Lei")
@@ -807,11 +567,8 @@ def get_domains_from_bing(page, sku):
     
     return results
 
-
-# ============ VIZITĂ SITE (doar dacă trebuie) ============
 def find_price_on_site(page, domain, sku, save_debug=False):
-    """Vizitează site-ul doar dacă nu avem preț din SERP"""
-    
+    """Visit site if needed"""
     search_url = SEARCH_URLS.get(domain, f'https://www.{domain}/search?q={{}}')
     sku_norm = normalize(sku)
     sku_lower = sku.lower()
@@ -835,14 +592,12 @@ def find_price_on_site(page, domain, sku, save_debug=False):
         body_text = page.locator('body').inner_text()
         body_lower = body_text.lower()
         
-        # Check erori
         error_phrases = ['0 produse', 'nu s-au gasit', 'nu am gasit', 'niciun rezultat', '0 rezultate']
         for phrase in error_phrases:
             if phrase in body_lower and 'produse)' not in body_lower:
                 logger.info(f"         ⚠️ {phrase}")
                 return None
         
-        # Check SKU
         has_sku = sku_lower in body_lower or sku_norm in normalize(body_text)
         if not has_sku:
             return None
@@ -856,7 +611,6 @@ def find_price_on_site(page, domain, sku, save_debug=False):
     except Exception as e:
         logger.info(f"         ❌ {str(e)[:30]}")
         return None
-
 
 def scan_product(sku, name, your_price=0):
     found = []
@@ -877,7 +631,6 @@ def scan_product(sku, name, your_price=0):
             timezone_id='Europe/Bucharest',
         )
         
-        # Stealth
         context.add_init_script("""
             Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
         """)
@@ -885,11 +638,9 @@ def scan_product(sku, name, your_price=0):
         page = context.new_page()
         
         try:
-            # ========== PASUL 1: GOOGLE SEARCH BY SKU ==========
             logger.info(f"   🔍 Google #1: SKU...")
             google_results = google_stealth_search(page, sku, sku, sku_name=name)
             
-            # Adaugă rezultatele cu preț direct
             for r in google_results:
                 if r['price'] > 0:
                     found.append({
@@ -899,10 +650,8 @@ def scan_product(sku, name, your_price=0):
                         'method': 'Google SKU'
                     })
             
-            # ========== PASUL 2: GOOGLE SEARCH BY NAME (dacă avem < 5) ==========
             if len(found) < 5 and name and len(name) > 10:
                 logger.info(f"   🔍 Google #2: Denumire...")
-                # Construiește query din denumire (primele 5-6 cuvinte + SKU)
                 name_words = name.split()[:6]
                 name_query = ' '.join(name_words)
                 if sku.upper() not in name_query.upper():
@@ -910,7 +659,6 @@ def scan_product(sku, name, your_price=0):
                 
                 google_results_name = google_stealth_search(page, name_query, f"{sku}_name", sku_name=name)
                 
-                # Adaugă doar site-uri noi
                 for r in google_results_name:
                     if r['price'] > 0 and not any(f['name'] == r['domain'] for f in found):
                         found.append({
@@ -921,7 +669,6 @@ def scan_product(sku, name, your_price=0):
                         })
                         logger.info(f"      🟡 {r['domain']}: {r['price']} Lei (din denumire)")
             
-            # ========== PASUL 2: BING (fallback) ==========
             if len(found) < 3:
                 logger.info(f"   🔍 Bing completează...")
                 query = f"{sku} pret"
@@ -940,10 +687,8 @@ def scan_product(sku, name, your_price=0):
                 bing_results = get_domains_from_bing(page, sku)
                 
                 for r in bing_results:
-                    # Nu adăuga duplicate
                     if any(f['name'] == r['domain'] for f in found):
                         continue
-                    
                     if r['price'] > 0 and r.get('has_sku'):
                         found.append({
                             'name': r['domain'],
@@ -961,11 +706,9 @@ def scan_product(sku, name, your_price=0):
         
         browser.close()
     
-    # Calculează diff pentru fiecare rezultat
     for r in found:
         r['diff'] = round(((r['price'] - your_price) / your_price) * 100, 1) if your_price > 0 else 0
     
-    # FILTRU: păstrează doar rezultatele în intervalul ±30% față de prețul nostru
     if your_price > 0:
         before_filter = len(found)
         found = [r for r in found if -30 <= r['diff'] <= 30]
@@ -975,7 +718,6 @@ def scan_product(sku, name, your_price=0):
     
     found.sort(key=lambda x: x['price'])
     return found[:5]
-
 
 @app.route('/')
 def index():
