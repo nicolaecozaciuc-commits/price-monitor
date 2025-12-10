@@ -121,5 +121,5 @@ def api_check():
     return jsonify({"status": "success", "competitors": results})
 
 if __name__ == '__main__':
-    # Rulare server
+    # Rulare server pe toate interfețele
     app.run(host='0.0.0.0', port=8080)
