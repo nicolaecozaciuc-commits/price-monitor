@@ -16,7 +16,16 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s | %(message)s', date
 logger = logging.getLogger('PriceMonitor')
 
 BLOCKED = ['google', 'bing', 'microsoft', 'facebook', 'youtube', 'doarbai', 'termohabitat', 
-           'wikipedia', 'amazon', 'ebay', 'olx']
+           'wikipedia', 'amazon', 'ebay', 'olx', 'kaufland']
+
+# Site-uri directe ca fallback
+DIRECT_SITES = {
+    'foglia.ro': 'https://www.foglia.ro/catalogsearch/result/?q={}',
+    'bagno.ro': 'https://www.bagno.ro/catalogsearch/result/?q={}',
+    'instalatiiaz.ro': 'https://www.instalatiiaz.ro/?s={}',
+    'sensodays.ro': 'https://www.sensodays.ro/catalogsearch/result/?q={}',
+    'absulo.ro': 'https://www.absulo.ro/catalogsearch/result/?q={}',
+}
 
 def clean_price(value):
     if not value: return 0
@@ -44,9 +53,7 @@ def is_valid_domain(domain):
     if any(b in domain for b in BLOCKED):
         return False
     match = re.match(r'^([a-z0-9-]+)\.ro$', domain)
-    if match and len(match.group(1)) >= 3:
-        return True
-    return False
+    return match and len(match.group(1)) >= 3
 
 def extract_price_from_page(page):
     """Extrage preț din pagina produsului"""
@@ -72,16 +79,15 @@ def extract_price_from_page(page):
         pass
     
     # META
-    for sel in ['meta[property="product:price:amount"]']:
-        try:
-            p = clean_price(page.locator(sel).first.get_attribute('content'))
-            if p > 0:
-                return p
-        except:
-            pass
+    try:
+        p = clean_price(page.locator('meta[property="product:price:amount"]').first.get_attribute('content'))
+        if p > 0:
+            return p
+    except:
+        pass
     
     # CSS
-    for sel in ['[data-price-amount]', '.price', '[class*="price"]']:
+    for sel in ['[data-price-amount]', '.price-new', '.special-price .price', '.price']:
         try:
             el = page.locator(sel).first
             p = clean_price(el.get_attribute('data-price-amount') or el.inner_text())
@@ -92,86 +98,100 @@ def extract_price_from_page(page):
     
     return 0
 
-def verify_product_on_page(page, url, sku):
-    """Accesează URL-ul și verifică dacă produsul există"""
-    try:
-        page.goto(url, timeout=12000, wait_until='domcontentloaded')
-        time.sleep(1.5)
-        
-        body_text = page.locator('body').inner_text().lower()
-        
-        # Verifică dacă e pagină de eroare
-        error_phrases = ['not found', 'nothing found', 'nu a fost gasit', 'no results', 
-                        'nu exista', 'pagina nu exista', '404', 'sorry']
-        if any(phrase in body_text for phrase in error_phrases):
-            return None
-        
-        # Verifică dacă SKU există în pagină
-        sku_norm = normalize(sku)
-        if sku_norm not in normalize(body_text) and sku_norm[1:] not in normalize(body_text):
-            return None
-        
-        # Extrage prețul
-        price = extract_price_from_page(page)
-        if price > 0:
-            return price
-            
-    except:
-        pass
-    
-    return None
-
 def get_urls_from_bing(page, sku):
-    """Extrage URL-uri din rezultatele Bing"""
+    """Extrage URL-uri din Bing - mai multe metode"""
     urls = []
     
     try:
-        # Caută în rezultatele Bing
-        results = page.locator('.b_algo').all()
-        
-        for result in results[:15]:
+        # Metodă 1: Rezultate standard .b_algo
+        for result in page.locator('.b_algo').all()[:15]:
             try:
-                link = result.locator('a').first
-                href = link.get_attribute('href') or ''
-                
-                # Extrage domain
+                href = result.locator('a').first.get_attribute('href') or ''
                 domain_match = re.search(r'https?://(?:www\.)?([a-z0-9-]+\.ro)', href.lower())
-                if not domain_match:
-                    continue
-                    
-                domain = domain_match.group(1)
-                if not is_valid_domain(domain):
-                    continue
-                
-                # Extrage preț din snippet (pentru referință)
-                text = result.inner_text()
-                price_match = re.search(r'([\d.,]+)\s*(?:RON|Lei)', text)
-                hint_price = clean_price(price_match.group(1)) if price_match else 0
-                
-                urls.append({
-                    'url': href,
-                    'domain': domain,
-                    'hint_price': hint_price
-                })
-                
+                if domain_match and is_valid_domain(domain_match.group(1)):
+                    urls.append({'url': href, 'domain': domain_match.group(1)})
+            except:
+                continue
+        
+        # Metodă 2: Toate linkurile .ro din pagină
+        for link in page.locator('a[href*=".ro"]').all()[:30]:
+            try:
+                href = link.get_attribute('href') or ''
+                domain_match = re.search(r'https?://(?:www\.)?([a-z0-9-]+\.ro)', href.lower())
+                if domain_match and is_valid_domain(domain_match.group(1)):
+                    domain = domain_match.group(1)
+                    if not any(u['domain'] == domain for u in urls):
+                        urls.append({'url': href, 'domain': domain})
             except:
                 continue
                 
     except:
         pass
     
-    # Deduplicate by domain
-    seen = set()
-    unique = []
-    for u in urls:
-        if u['domain'] not in seen:
-            seen.add(u['domain'])
-            unique.append(u)
+    return urls[:10]
+
+def verify_and_get_price(page, url, sku):
+    """Verifică URL și extrage preț"""
+    try:
+        page.goto(url, timeout=12000, wait_until='domcontentloaded')
+        time.sleep(1.5)
+        
+        body_text = page.locator('body').inner_text().lower()
+        
+        # Skip pagini de eroare
+        if any(x in body_text for x in ['not found', 'nothing found', 'nu a fost gasit', '404']):
+            return None
+        
+        # Verifică SKU (mai permisiv)
+        sku_norm = normalize(sku)
+        body_norm = normalize(body_text)
+        
+        # SKU complet sau parțial
+        if sku_norm in body_norm or sku_norm[1:] in body_norm or sku_norm[:5] in body_norm:
+            price = extract_price_from_page(page)
+            if price > 0:
+                return price
+                
+    except:
+        pass
     
-    return unique
+    return None
+
+def search_direct_site(page, domain, search_url, sku):
+    """Caută direct pe un site"""
+    try:
+        url = search_url.format(quote_plus(sku))
+        page.goto(url, timeout=12000, wait_until='domcontentloaded')
+        time.sleep(1.5)
+        
+        sku_lower = sku.lower()
+        sku_norm = normalize(sku)
+        
+        # Caută link cu SKU
+        for link in page.locator('a[href]').all()[:30]:
+            try:
+                href = link.get_attribute('href') or ''
+                if sku_lower in href.lower() or sku_norm in normalize(href):
+                    if href.startswith('/'):
+                        href = f"https://www.{domain}{href}"
+                    if domain in href:
+                        page.goto(href, timeout=10000, wait_until='domcontentloaded')
+                        time.sleep(1)
+                        
+                        price = extract_price_from_page(page)
+                        if price > 0:
+                            return {'price': price, 'url': href}
+            except:
+                continue
+                
+    except:
+        pass
+    
+    return None
 
 def scan_product(sku, name, your_price=0):
     found = []
+    found_domains = set()
     sku = str(sku).strip()
     
     logger.info(f"🔎 {sku} - {name[:30]}...")
@@ -187,7 +207,9 @@ def scan_product(sku, name, your_price=0):
         page = context.new_page()
         
         try:
-            # ETAPA 1: Bing search
+            # ═══════════════════════════════════════════════════
+            # ETAPA 1: Bing Discovery
+            # ═══════════════════════════════════════════════════
             query = f"{sku} pret"
             url = f"https://www.bing.com/search?q={quote_plus(query)}"
             
@@ -196,38 +218,62 @@ def scan_product(sku, name, your_price=0):
             page.goto(url, timeout=20000, wait_until='domcontentloaded')
             time.sleep(2)
             
-            # Accept cookies
             try:
                 page.click('#bnp_btn_accept', timeout=2000)
                 time.sleep(0.5)
             except:
                 pass
             
-            # Extrage URL-uri
             urls = get_urls_from_bing(page, sku)
-            logger.info(f"   📋 Găsite {len(urls)} URL-uri de verificat")
+            logger.info(f"   📋 Bing: {len(urls)} URL-uri")
             
-            # ETAPA 2: Verifică fiecare URL
             for item in urls:
-                logger.info(f"      🔗 Verific {item['domain']}...")
-                
-                price = verify_product_on_page(page, item['url'], sku)
+                if item['domain'] in found_domains:
+                    continue
+                    
+                logger.info(f"      🔗 {item['domain']}...")
+                price = verify_and_get_price(page, item['url'], sku)
                 
                 if price:
                     found.append({
                         'name': item['domain'],
                         'price': price,
                         'url': item['url'],
-                        'method': 'Bing+Verify'
+                        'method': 'Bing'
                     })
-                    logger.info(f"      ✅ {item['domain']}: {price} Lei")
-                else:
-                    logger.info(f"      ❌ {item['domain']}: produs negăsit")
+                    found_domains.add(item['domain'])
+                    logger.info(f"      ✅ {price} Lei")
                 
                 time.sleep(0.3)
-                
                 if len(found) >= 5:
                     break
+            
+            # ═══════════════════════════════════════════════════
+            # ETAPA 2: Fallback - Site-uri directe
+            # ═══════════════════════════════════════════════════
+            if len(found) < 3:
+                logger.info(f"   🔄 Fallback: căutare directă...")
+                
+                for domain, search_url in DIRECT_SITES.items():
+                    if domain in found_domains:
+                        continue
+                    
+                    logger.info(f"      🔗 {domain}...")
+                    result = search_direct_site(page, domain, search_url, sku)
+                    
+                    if result:
+                        found.append({
+                            'name': domain,
+                            'price': result['price'],
+                            'url': result['url'],
+                            'method': 'Direct'
+                        })
+                        found_domains.add(domain)
+                        logger.info(f"      ✅ {result['price']} Lei")
+                    
+                    time.sleep(0.3)
+                    if len(found) >= 5:
+                        break
             
         except Exception as e:
             logger.info(f"   ❌ Error: {str(e)[:50]}")
@@ -244,7 +290,7 @@ def scan_product(sku, name, your_price=0):
             r['diff'] = 0
     
     found.sort(key=lambda x: x['price'])
-    logger.info(f"📊 Total verificate: {len(found)}")
+    logger.info(f"📊 Total: {len(found)}")
     return found[:5]
 
 @app.route('/')
@@ -259,5 +305,5 @@ def api_check():
     return jsonify({"status": "success", "competitors": results})
 
 if __name__ == '__main__':
-    logger.info("🚀 PriceMonitor v7.3 (Bing + Verificare) pe :8080")
+    logger.info("🚀 PriceMonitor v7.4 (Bing + Direct Fallback) pe :8080")
     app.run(host='0.0.0.0', port=8080)
