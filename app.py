@@ -3,7 +3,7 @@ import logging
 import time
 import json
 import os
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, unquote
 from flask import Flask, request, jsonify, render_template, send_file
 from flask_cors import CORS
 from playwright.sync_api import sync_playwright
@@ -19,8 +19,7 @@ logger = logging.getLogger('PriceMonitor')
 DEBUG_DIR = '/root/monitor/debug'
 os.makedirs(DEBUG_DIR, exist_ok=True)
 
-BLOCKED = ['google', 'bing', 'microsoft', 'facebook', 'youtube', 'doarbai', 
-           'termohabitat', 'wikipedia']
+BLOCKED = ['google', 'bing', 'microsoft', 'facebook', 'youtube', 'doarbai', 'termohabitat', 'wikipedia']
 
 def clean_price(value):
     if not value: return 0
@@ -64,7 +63,7 @@ def extract_price_from_page(page):
     except:
         pass
     
-    # META
+    # META + CSS
     try:
         p = clean_price(page.locator('meta[property="product:price:amount"]').first.get_attribute('content'))
         if p > 0:
@@ -72,8 +71,7 @@ def extract_price_from_page(page):
     except:
         pass
     
-    # CSS
-    for sel in ['[data-price-amount]', '.price-new', '.special-price .price', '.product-price', '.price']:
+    for sel in ['[data-price-amount]', '.price-new', '.price']:
         try:
             el = page.locator(sel).first
             p = clean_price(el.get_attribute('data-price-amount') or el.inner_text())
@@ -84,38 +82,68 @@ def extract_price_from_page(page):
     
     return 0
 
-def get_urls_from_bing_html(html_content):
-    """Extrage URL-uri direct din HTML cu regex"""
+def get_urls_from_bing(page, html):
+    """Extrage URL-uri - multiple metode"""
     urls = []
     
-    # Caută toate URL-urile .ro
-    pattern = r'href="(https?://(?:www\.)?([a-z0-9-]+\.ro)[^"]*)"'
-    matches = re.findall(pattern, html_content.lower())
+    # Metodă 1: Regex pe HTML - mai multe pattern-uri
+    patterns = [
+        r'href="(https?://(?:www\.)?([a-z0-9-]+\.ro)[^"]*)"',
+        r"href='(https?://(?:www\.)?([a-z0-9-]+\.ro)[^']*)'",
+        r'href=\\"(https?://(?:www\.)?([a-z0-9-]+\.ro)[^"]*)\\"',
+        r'"url":\s*"(https?://(?:www\.)?([a-z0-9-]+\.ro)[^"]*)"',
+    ]
     
-    for url, domain in matches:
-        if any(b in domain for b in BLOCKED):
-            continue
-        if not any(u['domain'] == domain for u in urls):
-            urls.append({'url': url, 'domain': domain})
+    for pattern in patterns:
+        matches = re.findall(pattern, html, re.IGNORECASE)
+        for url, domain in matches:
+            domain = domain.lower()
+            if any(b in domain for b in BLOCKED):
+                continue
+            if not any(u['domain'] == domain for u in urls):
+                # Decode URL
+                try:
+                    url = unquote(url)
+                except:
+                    pass
+                urls.append({'url': url, 'domain': domain})
+    
+    # Metodă 2: Playwright locators
+    if len(urls) < 3:
+        try:
+            for link in page.locator('a').all()[:50]:
+                try:
+                    href = link.get_attribute('href') or ''
+                    if '.ro' in href and not any(b in href.lower() for b in BLOCKED):
+                        domain_match = re.search(r'(?:www\.)?([a-z0-9-]+\.ro)', href.lower())
+                        if domain_match:
+                            domain = domain_match.group(1)
+                            if not any(u['domain'] == domain for u in urls):
+                                urls.append({'url': href, 'domain': domain})
+                except:
+                    continue
+        except:
+            pass
+    
+    # Debug: arată câte URL-uri .ro sunt în HTML
+    all_ro = re.findall(r'([a-z0-9-]+\.ro)', html.lower())
+    unique_ro = list(set(all_ro))
+    logger.info(f"   🔎 Domenii în HTML: {[d for d in unique_ro if not any(b in d for b in BLOCKED)][:10]}")
     
     return urls[:15]
 
 def verify_product(page, url, sku):
-    """Verifică produs"""
     try:
         page.goto(url, timeout=15000, wait_until='domcontentloaded')
         time.sleep(2)
         
         body_text = page.locator('body').inner_text().lower()
         
-        # Skip pagini de eroare
-        error_phrases = ['nu am gasit', 'nu a fost gasit', 'nothing found', 'no results', 
-                        '0 rezultate', 'pagina nu exista', '404']
+        error_phrases = ['nu am gasit', 'nu a fost gasit', 'nothing found', '0 rezultate', '404']
         for phrase in error_phrases:
             if phrase in body_text:
                 return None
         
-        # Verifică SKU
         sku_norm = normalize(sku)
         body_norm = normalize(body_text)
         
@@ -124,7 +152,6 @@ def verify_product(page, url, sku):
             return price if price > 0 else None
         
         return None
-        
     except:
         return None
 
@@ -153,28 +180,27 @@ def scan_product(sku, name, your_price=0):
             page.goto(url, timeout=20000, wait_until='domcontentloaded')
             time.sleep(3)
             
-            # Accept cookies ÎNTÂI
+            # Accept cookies
             try:
                 page.click('#bnp_btn_accept', timeout=3000)
                 time.sleep(2)
             except:
                 pass
             
-            # Salvează screenshot și HTML
+            # Salvează debug
             page.screenshot(path=f"{DEBUG_DIR}/bing_{sku}.png")
             html = page.content()
-            with open(f"{DEBUG_DIR}/bing_{sku}.html", 'w') as f:
+            with open(f"{DEBUG_DIR}/bing_{sku}.html", 'w', encoding='utf-8') as f:
                 f.write(html)
             
-            # Extrage URL-uri din HTML
-            urls = get_urls_from_bing_html(html)
-            logger.info(f"   🌐 Domenii: {[u['domain'] for u in urls[:8]]}")
-            logger.info(f"   📋 URL-uri: {len(urls)}")
+            # Extrage URL-uri
+            urls = get_urls_from_bing(page, html)
+            logger.info(f"   🌐 URL-uri extrase: {[u['domain'] for u in urls[:8]]}")
+            logger.info(f"   📋 Total URL-uri: {len(urls)}")
             
-            # Verifică fiecare
+            # Verifică
             for item in urls:
                 logger.info(f"      🔗 {item['domain']}...")
-                
                 price = verify_product(page, item['url'], sku)
                 
                 if price:
@@ -192,7 +218,7 @@ def scan_product(sku, name, your_price=0):
                 if len(found) >= 5:
                     break
             
-            logger.info(f"   📊 Total: {len(found)}")
+            logger.info(f"   📊 Total verificate: {len(found)}")
             
         except Exception as e:
             logger.info(f"   ❌ Error: {str(e)[:50]}")
@@ -222,9 +248,11 @@ def api_check():
 def get_debug(filename):
     filepath = f"{DEBUG_DIR}/{filename}"
     if os.path.exists(filepath):
+        if filename.endswith('.html'):
+            return send_file(filepath, mimetype='text/html')
         return send_file(filepath)
     return "Not found", 404
 
 if __name__ == '__main__':
-    logger.info("🚀 PriceMonitor v8.4 (HTML Regex) pe :8080")
+    logger.info("🚀 PriceMonitor v8.5 (Multi-Extract) pe :8080")
     app.run(host='0.0.0.0', port=8080)
