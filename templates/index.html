@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Price Monitor v8 - Dark Edition</title>
+    <title>Price Monitor v8 - Direct Scraping</title>
     
     <!-- Librării React -->
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
@@ -53,7 +53,6 @@
         const parsePrice = (p) => {
             if (!p) return 0;
             let c = String(p).trim();
-            // Format RO: 7.999,00 -> 7999.00
             if (c.includes(',') && c.indexOf(',') > c.lastIndexOf('.')) c = c.replace(/\./g, '').replace(',', '.');
             else if (c.includes(',')) c = c.replace(',', '.');
             return parseFloat(c.replace(/[^0-9.]/g, '')) || 0;
@@ -89,12 +88,12 @@
 
             const handleBulk = () => {
                 if (products.length === 0) return alert("Încarcă CSV!");
-                if (confirm(`Verifici ${products.length} produse REAL?`)) {
+                if (confirm(`Verificarea va dura mai mult deoarece intrăm direct pe site-urile concurenților (Dedeman, eMAG, etc).\n\nContinui?`)) {
                     setBulkProgress({ current: 0, total: products.length });
                     let i = 0;
                     const next = () => {
                         if (i >= products.length) { setBulkProgress(null); return; }
-                        handleCheckPrice(products[i].id).then(() => { i++; setTimeout(next, 3000); });
+                        handleCheckPrice(products[i].id).then(() => { i++; setTimeout(next, 2000); });
                     };
                     next();
                 }
@@ -142,7 +141,7 @@
                 const blob = new Blob([csv], { type: 'text/csv' });
                 const url = window.URL.createObjectURL(blob);
                 const a = document.createElement('a');
-                a.href = url; a.download = "rezultate_v8.csv"; a.click();
+                a.href = url; a.download = "rezultate_direct_scraping.csv"; a.click();
             };
 
             return (
@@ -154,7 +153,7 @@
                                 <span className="bg-gradient-to-r from-indigo-500 to-purple-600 text-transparent bg-clip-text">📊</span> 
                                 PriceMonitor v8
                             </div>
-                            <div className="text-gray-500 text-sm mt-1">Interfață Dark Mode • Motor Real</div>
+                            <div className="text-gray-500 text-sm mt-1">Direct Scraping (Dedeman, eMAG, Leroy, Hornbach)</div>
                         </div>
                         <div className="flex gap-3 items-center">
                             {bulkProgress && (
@@ -207,7 +206,7 @@
                                     <tr>
                                         <th className="p-4">Produs / SKU</th>
                                         <th className="p-4">Preț Tău</th>
-                                        <th className="p-4">Concurență (Google)</th>
+                                        <th className="p-4">Concurență (Direct)</th>
                                         <th className="p-4 text-right">Acțiuni</th>
                                     </tr>
                                 </thead>
