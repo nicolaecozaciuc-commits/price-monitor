@@ -3,23 +3,35 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Price Monitor - Professional</title>
+    <title>Price Monitor v8 - Dark Edition</title>
     
-    <!-- React & ReactDOM -->
+    <!-- Librării React -->
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     
-    <!-- Tailwind CSS (Design) -->
+    <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
+
+    <style>
+        body { background-color: #0f0f0f; color: #e0e0e0; font-family: 'Segoe UI', sans-serif; }
+        .animate-fadeIn { animation: fadeIn 0.5s ease-out; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        
+        /* Scrollbar Dark */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #1a1a1a; }
+        ::-webkit-scrollbar-thumb { background: #333; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #555; }
+    </style>
 </head>
-<body class="bg-gray-50 text-gray-800 font-sans">
+<body>
     <div id="root"></div>
 
     <script type="text/babel">
         const { useState } = React;
 
-        // --- PARSER CSV AVANSAT (Rezolvă problema 'Preț 0') ---
+        // --- PARSER CSV UNIVERSAL ---
         const parseCSV = (text) => {
             const rows = []; let currentRow = []; let currentCell = ''; let inQuote = false;
             const cleanText = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
@@ -41,7 +53,7 @@
         const parsePrice = (p) => {
             if (!p) return 0;
             let c = String(p).trim();
-            // Format RO (1.200,00) -> 1200.00
+            // Format RO: 7.999,00 -> 7999.00
             if (c.includes(',') && c.indexOf(',') > c.lastIndexOf('.')) c = c.replace(/\./g, '').replace(',', '.');
             else if (c.includes(',')) c = c.replace(',', '.');
             return parseFloat(c.replace(/[^0-9.]/g, '')) || 0;
@@ -49,110 +61,78 @@
 
         const normalize = (h) => h ? h.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]/g, "") : "";
 
-        // --- COMPONENTA PRINCIPALĂ ---
+        // --- DASHBOARD UI DARK ---
         const Dashboard = () => {
             const [products, setProducts] = useState([]);
-            const [loading, setLoading] = useState(null); // Stare pentru bara de progres
+            const [checkingIds, setCheckingIds] = useState(new Set());
+            const [bulkProgress, setBulkProgress] = useState(null);
 
-            // Verificare produs individual
-            const checkProduct = async (id) => {
+            const handleCheckPrice = async (id) => {
                 const p = products.find(x => x.id === id);
                 if (!p) return;
-
-                // Marcare ca "se verifică" (vizual)
-                setProducts(prev => prev.map(x => x.id === id ? {...x, checking: true} : x));
-
+                setCheckingIds(prev => new Set(prev).add(id));
                 try {
                     const res = await fetch('/api/check', {
-                        method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
+                        method: 'POST', headers: {'Content-Type': 'application/json'},
                         body: JSON.stringify({ sku: p.sku, name: p.name })
                     });
                     const data = await res.json();
-                    
                     if (data.status === 'success') {
-                        setProducts(prev => prev.map(x => x.id === id ? { 
-                            ...x, 
-                            competitors: data.competitors, 
-                            checking: false,
-                            lastCheck: new Date().toLocaleTimeString() 
-                        } : x));
+                        setProducts(prev => prev.map(prod => prod.id === id ? { ...prod, competitors: data.competitors } : prod));
                     }
-                } catch (e) {
-                    console.error("Eroare API:", e);
-                    setProducts(prev => prev.map(x => x.id === id ? {...x, checking: false} : x));
+                } catch (e) { console.error(e); } 
+                finally {
+                    setCheckingIds(prev => { const n = new Set(prev); n.delete(id); return n; });
+                    if(bulkProgress) setBulkProgress(prev => prev ? { ...prev, current: prev.current + 1 } : null);
                 }
             };
 
-            // Verificare în masă
-            const runBulkCheck = () => {
-                if (products.length === 0) return alert("Încarcă mai întâi un fișier CSV!");
-                if (!confirm(`Vrei să verifici ${products.length} produse? Va dura ceva timp.`)) return;
-
-                setLoading({ current: 0, total: products.length });
-                let i = 0;
-
-                const processNext = () => {
-                    if (i >= products.length) {
-                        setLoading(null);
-                        alert("Verificare finalizată!");
-                        return;
-                    }
-                    
-                    // Actualizare progres
-                    setLoading({ current: i + 1, total: products.length });
-                    
-                    checkProduct(products[i].id).then(() => {
-                        i++;
-                        // Pauză de siguranță între cereri (2 secunde)
-                        setTimeout(processNext, 2000);
-                    });
-                };
-                processNext();
+            const handleBulk = () => {
+                if (products.length === 0) return alert("Încarcă CSV!");
+                if (confirm(`Verifici ${products.length} produse REAL?`)) {
+                    setBulkProgress({ current: 0, total: products.length });
+                    let i = 0;
+                    const next = () => {
+                        if (i >= products.length) { setBulkProgress(null); return; }
+                        handleCheckPrice(products[i].id).then(() => { i++; setTimeout(next, 3000); });
+                    };
+                    next();
+                }
             };
 
-            // Import CSV
             const handleUpload = (e) => {
                 const file = e.target.files[0];
                 if (!file) return;
                 const reader = new FileReader();
                 reader.onload = (evt) => {
                     const rows = parseCSV(evt.target.result);
-                    if (rows.length < 2) return alert("Fișier invalid sau gol.");
+                    if (rows.length < 2) return alert("CSV invalid");
                     
                     const headers = rows[0];
                     const normHeaders = headers.map(h => normalize(h));
                     
-                    // Detecție coloane
                     let idxSku = normHeaders.findIndex(h => h.includes('sku'));
-                    let idxName = normHeaders.findIndex(h => h.includes('nume') || h.includes('titlu'));
-                    
-                    // Logică preț (Prioritate: Pret Nostru > Pret Obisnuit > Pret)
+                    let idxName = normHeaders.findIndex(h => h.includes('nume'));
                     let idxPrice = normHeaders.indexOf('pretnostru');
                     if (idxPrice === -1) idxPrice = normHeaders.findIndex(h => h.includes('pretobisnuit'));
                     if (idxPrice === -1) idxPrice = normHeaders.findIndex(h => h.includes('pret') && !h.includes('concurent'));
 
-                    if (idxSku === -1 || idxPrice === -1) 
-                        return alert(`Coloane lipsă! Asigură-te că ai 'SKU' și 'Preț' în CSV.\nGăsite: ${headers.join(', ')}`);
+                    if (idxSku === -1 || idxPrice === -1) return alert("Nu găsesc SKU sau Preț.");
 
-                    const newProds = rows.slice(1).map((row, i) => {
+                    setProducts(rows.slice(1).map((row, i) => {
                         if (row.length <= idxSku) return null;
                         return {
                             id: Date.now() + i,
-                            name: row[idxName] || "Fără Nume",
+                            name: row[idxName] || "",
                             sku: row[idxSku],
                             price: parsePrice(row[idxPrice]),
-                            competitors: [],
-                            checking: false
+                            competitors: []
                         };
-                    }).filter(p => p && p.sku); // Elimină rândurile goale
-
-                    setProducts(newProds);
+                    }).filter(p => p && p.sku));
                 };
                 reader.readAsText(file);
             };
 
-            // Export CSV
             const handleExport = () => {
                 let csv = "SKU,Nume,Pret Nostru,Pret Concurent (Min),Link\n";
                 products.forEach(p => {
@@ -162,114 +142,114 @@
                 const blob = new Blob([csv], { type: 'text/csv' });
                 const url = window.URL.createObjectURL(blob);
                 const a = document.createElement('a');
-                a.href = url; a.download = "rezultate_preturi.csv"; a.click();
+                a.href = url; a.download = "rezultate_v8.csv"; a.click();
             };
 
             return (
-                <div className="container mx-auto px-4 py-8">
-                    {/* HEADER */}
-                    <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6 flex flex-col md:flex-row justify-between items-center gap-4">
+                <div className="min-h-screen bg-[#0f0f0f] text-gray-200 font-sans p-6">
+                    {/* Header Card */}
+                    <div className="flex justify-between items-center mb-8 bg-[#1a1a1a] p-6 rounded-xl border border-[#2a2a2a] shadow-lg">
                         <div>
-                            <h1 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
-                                <span className="text-blue-600">📊</span> PriceMonitor
-                            </h1>
-                            <p className="text-sm text-gray-500">Versiune Clean & Real (v9.0)</p>
+                            <div className="text-2xl font-bold text-white flex items-center gap-3">
+                                <span className="bg-gradient-to-r from-indigo-500 to-purple-600 text-transparent bg-clip-text">📊</span> 
+                                PriceMonitor v8
+                            </div>
+                            <div className="text-gray-500 text-sm mt-1">Interfață Dark Mode • Motor Real</div>
                         </div>
-                        
-                        <div className="flex gap-3">
-                            <label className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded-md cursor-pointer border border-gray-300 transition font-medium text-sm">
-                                📂 Import CSV
-                                <input type="file" accept=".csv" onChange={handleUpload} className="hidden" />
-                            </label>
-                            
-                            <button 
-                                onClick={runBulkCheck} 
-                                disabled={!!loading || products.length === 0}
-                                className={`px-4 py-2 rounded-md text-white font-medium text-sm transition shadow-sm
-                                    ${loading ? 'bg-gray-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'}`}
-                            >
-                                {loading ? `⏳ Progres: ${loading.current}/${loading.total}` : '🚀 Start Scanare'}
-                            </button>
-
-                            {products.length > 0 && (
-                                <button onClick={handleExport} className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-md font-medium text-sm shadow-sm">
-                                    📥 Export
-                                </button>
+                        <div className="flex gap-3 items-center">
+                            {bulkProgress && (
+                                <div className="bg-blue-900/30 text-blue-300 px-4 py-2 rounded-lg border border-blue-500/30 flex items-center gap-2 animate-pulse">
+                                    <div className="text-xl">⚙️</div>
+                                    <div>
+                                        <div className="text-xs font-bold uppercase">Progres</div>
+                                        <div className="font-mono">{bulkProgress.current} / {bulkProgress.total}</div>
+                                    </div>
+                                </div>
                             )}
+                            <button onClick={handleBulk} disabled={!!bulkProgress} className="bg-gradient-to-r from-indigo-600 to-purple-600 px-6 py-3 rounded-lg text-white font-bold hover:from-indigo-700 hover:to-purple-700 transition shadow-lg shadow-indigo-500/30 disabled:opacity-50 disabled:cursor-not-allowed">
+                                {bulkProgress ? '⏳ Se lucrează...' : '🚀 Start Scanare'}
+                            </button>
+                            {products.length > 0 && <button onClick={handleExport} className="bg-emerald-600 px-6 py-3 rounded-lg text-white font-bold hover:bg-emerald-700 transition shadow-lg">📥 Export</button>}
                         </div>
                     </div>
 
-                    {/* TABLE */}
-                    <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
-                        <table className="w-full text-left border-collapse">
-                            <thead className="bg-gray-50 text-gray-600 uppercase text-xs font-semibold tracking-wider">
-                                <tr>
-                                    <th className="p-4 border-b border-gray-200">Produs / SKU</th>
-                                    <th className="p-4 border-b border-gray-200 w-32">Preț Tău</th>
-                                    <th className="p-4 border-b border-gray-200">Concurență (Google)</th>
-                                    <th className="p-4 border-b border-gray-200 w-24 text-right">Acțiuni</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-gray-100 text-sm">
-                                {products.length === 0 ? (
+                    <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+                        {/* Sidebar */}
+                        <div className="space-y-4">
+                            <div className="bg-[#1a1a1a] p-5 rounded-xl border border-[#2a2a2a]">
+                                <h3 className="text-xs font-bold text-gray-500 uppercase mb-4 flex items-center gap-2">
+                                    <span>📁</span> Import Date
+                                </h3>
+                                <label className="block w-full cursor-pointer bg-[#252525] hover:bg-[#2a2a2a] border border-dashed border-gray-600 rounded-lg p-8 text-center transition group">
+                                    <div className="text-3xl mb-2 group-hover:scale-110 transition">📄</div>
+                                    <div className="text-sm text-gray-400 group-hover:text-white">Click pentru a încărca CSV</div>
+                                    <input type="file" accept=".csv" onChange={handleUpload} className="hidden"/>
+                                </label>
+                            </div>
+                            
+                            <div className="bg-[#1a1a1a] p-5 rounded-xl border border-[#2a2a2a]">
+                                <div className="text-gray-500 text-xs font-bold uppercase mb-2">Statistici</div>
+                                <div className="flex justify-between items-center mb-2">
+                                    <span>Total Produse:</span>
+                                    <span className="text-white font-bold">{products.length}</span>
+                                </div>
+                                <div className="flex justify-between items-center">
+                                    <span>Scanate:</span>
+                                    <span className="text-indigo-400 font-bold">{products.filter(p => p.competitors.length > 0).length}</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Main Table */}
+                        <div className="lg:col-span-3 bg-[#1a1a1a] rounded-xl border border-[#2a2a2a] overflow-hidden shadow-xl">
+                            <table className="w-full text-left text-sm text-gray-300">
+                                <thead className="bg-[#111] text-gray-500 uppercase text-xs">
                                     <tr>
-                                        <td colSpan="4" className="p-12 text-center text-gray-400 italic">
-                                            Niciun produs încărcat. Folosește butonul "Import CSV".
-                                        </td>
+                                        <th className="p-4">Produs / SKU</th>
+                                        <th className="p-4">Preț Tău</th>
+                                        <th className="p-4">Concurență (Google)</th>
+                                        <th className="p-4 text-right">Acțiuni</th>
                                     </tr>
-                                ) : products.map(p => (
-                                    <tr key={p.id} className="hover:bg-blue-50 transition-colors">
-                                        <td className="p-4 align-top">
-                                            <div className="font-medium text-gray-900">{p.name}</div>
-                                            <div className="text-xs text-gray-500 font-mono mt-1 bg-gray-100 inline-block px-1.5 py-0.5 rounded border border-gray-200">
-                                                {p.sku}
-                                            </div>
-                                        </td>
-                                        <td className="p-4 align-top">
-                                            <div className="font-bold text-gray-800">{p.price} Lei</div>
-                                        </td>
-                                        <td className="p-4 align-top">
-                                            {p.competitors.length > 0 ? (
-                                                <div className="space-y-1.5">
-                                                    {p.competitors.map((c, idx) => {
-                                                        const isCheaper = c.price < p.price;
-                                                        return (
-                                                            <div key={idx} className={`flex items-center justify-between px-2 py-1 rounded text-xs border ${isCheaper ? 'bg-red-50 border-red-100' : 'bg-green-50 border-green-100'}`}>
-                                                                <a href={c.url} target="_blank" className="text-blue-600 hover:underline truncate max-w-[200px] font-medium">
-                                                                    {c.name}
-                                                                </a>
-                                                                <span className={isCheaper ? 'text-red-600 font-bold' : 'text-green-600 font-bold'}>
-                                                                    {c.price} Lei
-                                                                </span>
+                                </thead>
+                                <tbody className="divide-y divide-[#2a2a2a]">
+                                    {products.map(p => (
+                                        <tr key={p.id} className="hover:bg-[#222] transition">
+                                            <td className="p-4 align-top">
+                                                <div className="font-bold text-gray-200 text-base">{p.name}</div>
+                                                <div className="text-xs text-gray-500 font-mono mt-1 bg-black/30 inline-block px-2 py-1 rounded border border-[#333]">{p.sku}</div>
+                                            </td>
+                                            <td className="p-4 align-top">
+                                                <div className="font-bold text-emerald-400 text-lg">{p.price} Lei</div>
+                                            </td>
+                                            <td className="p-4 align-top">
+                                                {p.competitors.length > 0 ? (
+                                                    <div className="space-y-2 animate-fadeIn">
+                                                        {p.competitors.map((c, i) => (
+                                                            <div key={i} className="flex items-center justify-between text-xs bg-black/20 p-2 rounded border border-[#333] hover:border-[#555] transition">
+                                                                <div className="flex items-center gap-2">
+                                                                    <div className={`w-2 h-2 rounded-full ${c.price < p.price ? 'bg-red-500' : 'bg-green-500'}`}></div>
+                                                                    <a href={c.url} target="_blank" className="text-indigo-400 hover:text-indigo-300 hover:underline font-medium">{c.name}</a>
+                                                                </div>
+                                                                <span className={c.price < p.price ? 'text-red-400 font-bold' : 'text-green-400 font-bold'}>{c.price} Lei</span>
                                                             </div>
-                                                        );
-                                                    })}
-                                                </div>
-                                            ) : (
-                                                <span className="text-gray-400 italic text-xs">
-                                                    {p.checking ? "Se caută..." : "Nicio verificare"}
-                                                </span>
-                                            )}
-                                        </td>
-                                        <td className="p-4 text-right align-top">
-                                            <button 
-                                                onClick={() => checkProduct(p.id)} 
-                                                disabled={p.checking}
-                                                className="text-gray-500 hover:text-blue-600 disabled:opacity-50 transition"
-                                                title="Verifică acest produs"
-                                            >
-                                                {p.checking ? <span className="animate-spin inline-block">↻</span> : '🔍'}
-                                            </button>
-                                        </td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
+                                                        ))}
+                                                    </div>
+                                                ) : <span className="text-gray-600 text-xs italic">...</span>}
+                                            </td>
+                                            <td className="p-4 text-right align-top">
+                                                <button onClick={() => handleCheckPrice(p.id)} className="text-indigo-400 hover:bg-indigo-900/30 border border-indigo-500/30 hover:border-indigo-500/50 px-3 py-1.5 rounded transition">
+                                                    {checkingIds.has(p.id) ? <span className="animate-spin inline-block">↻</span> : '🔍 Verifică'}
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
                 </div>
             );
         };
-
         const root = ReactDOM.createRoot(document.getElementById('root'));
         root.render(<Dashboard />);
     </script>
