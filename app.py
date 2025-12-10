@@ -19,9 +19,8 @@ logger = logging.getLogger('PriceMonitor')
 DEBUG_DIR = '/root/monitor/debug'
 os.makedirs(DEBUG_DIR, exist_ok=True)
 
-# DOAR site-urile tale și motoare de căutare
 BLOCKED = ['google', 'bing', 'microsoft', 'facebook', 'youtube', 'doarbai', 
-           'termohabitat', 'wikipedia', 'amazon.com', 'ebay']
+           'termohabitat', 'wikipedia']
 
 def clean_price(value):
     if not value: return 0
@@ -85,85 +84,48 @@ def extract_price_from_page(page):
     
     return 0
 
-def get_urls_from_bing(page):
-    """Extrage URL-uri din Bing - TOATE linkurile .ro"""
+def get_urls_from_bing_html(html_content):
+    """Extrage URL-uri direct din HTML cu regex"""
     urls = []
     
-    try:
-        # Metodă 1: .b_algo
-        for result in page.locator('.b_algo').all()[:15]:
-            try:
-                for link in result.locator('a').all()[:3]:
-                    href = link.get_attribute('href') or ''
-                    if '.ro' in href and 'bing' not in href.lower():
-                        domain_match = re.search(r'https?://(?:www\.)?([a-z0-9-]+\.ro)', href.lower())
-                        if domain_match:
-                            domain = domain_match.group(1)
-                            if not any(b in domain for b in BLOCKED):
-                                if not any(u['domain'] == domain for u in urls):
-                                    urls.append({'url': href, 'domain': domain})
-            except:
-                continue
-        
-        # Metodă 2: Toate linkurile cu .ro
-        if len(urls) < 5:
-            for link in page.locator('a[href*=".ro"]').all()[:30]:
-                try:
-                    href = link.get_attribute('href') or ''
-                    if 'bing' in href.lower():
-                        continue
-                    domain_match = re.search(r'https?://(?:www\.)?([a-z0-9-]+\.ro)', href.lower())
-                    if domain_match:
-                        domain = domain_match.group(1)
-                        if not any(b in domain for b in BLOCKED):
-                            if not any(u['domain'] == domain for u in urls):
-                                urls.append({'url': href, 'domain': domain})
-                except:
-                    continue
-                    
-    except:
-        pass
+    # Caută toate URL-urile .ro
+    pattern = r'href="(https?://(?:www\.)?([a-z0-9-]+\.ro)[^"]*)"'
+    matches = re.findall(pattern, html_content.lower())
     
-    logger.info(f"   🌐 Domenii: {[u['domain'] for u in urls[:8]]}")
-    return urls[:10]
+    for url, domain in matches:
+        if any(b in domain for b in BLOCKED):
+            continue
+        if not any(u['domain'] == domain for u in urls):
+            urls.append({'url': url, 'domain': domain})
+    
+    return urls[:15]
 
 def verify_product(page, url, sku):
-    """Verifică produs - mai permisiv"""
+    """Verifică produs"""
     try:
         page.goto(url, timeout=15000, wait_until='domcontentloaded')
         time.sleep(2)
         
         body_text = page.locator('body').inner_text().lower()
         
-        # Verifică să nu fie pagină de eroare
+        # Skip pagini de eroare
         error_phrases = ['nu am gasit', 'nu a fost gasit', 'nothing found', 'no results', 
-                        '0 rezultate', 'pagina nu exista', '404 not found']
+                        '0 rezultate', 'pagina nu exista', '404']
         for phrase in error_phrases:
             if phrase in body_text:
                 return None
         
-        # Verifică SKU - MAI PERMISIV
+        # Verifică SKU
         sku_norm = normalize(sku)
         body_norm = normalize(body_text)
         
-        # Încearcă mai multe variante
-        found_sku = False
-        if sku_norm in body_norm:
-            found_sku = True
-        elif sku_norm[1:] in body_norm:  # fără prima literă
-            found_sku = True
-        elif len(sku_norm) > 4 and sku_norm[:5] in body_norm:  # primele 5 caractere
-            found_sku = True
+        if sku_norm in body_norm or sku_norm[1:] in body_norm:
+            price = extract_price_from_page(page)
+            return price if price > 0 else None
         
-        if not found_sku:
-            return None
+        return None
         
-        # Extrage preț
-        price = extract_price_from_page(page)
-        return price if price > 0 else None
-        
-    except Exception as e:
-        logger.debug(f"      Verify error: {str(e)[:30]}")
+    except:
         return None
 
 def scan_product(sku, name, your_price=0):
@@ -189,17 +151,24 @@ def scan_product(sku, name, your_price=0):
             logger.info(f"   🔍 Bing: {query}")
             
             page.goto(url, timeout=20000, wait_until='domcontentloaded')
-            time.sleep(2)
+            time.sleep(3)
             
-            # Accept cookies
+            # Accept cookies ÎNTÂI
             try:
                 page.click('#bnp_btn_accept', timeout=3000)
-                time.sleep(1)
+                time.sleep(2)
             except:
                 pass
             
-            # Extrage URL-uri
-            urls = get_urls_from_bing(page)
+            # Salvează screenshot și HTML
+            page.screenshot(path=f"{DEBUG_DIR}/bing_{sku}.png")
+            html = page.content()
+            with open(f"{DEBUG_DIR}/bing_{sku}.html", 'w') as f:
+                f.write(html)
+            
+            # Extrage URL-uri din HTML
+            urls = get_urls_from_bing_html(html)
+            logger.info(f"   🌐 Domenii: {[u['domain'] for u in urls[:8]]}")
             logger.info(f"   📋 URL-uri: {len(urls)}")
             
             # Verifică fiecare
@@ -257,5 +226,5 @@ def get_debug(filename):
     return "Not found", 404
 
 if __name__ == '__main__':
-    logger.info("🚀 PriceMonitor v8.3 (Fixed) pe :8080")
+    logger.info("🚀 PriceMonitor v8.4 (HTML Regex) pe :8080")
     app.run(host='0.0.0.0', port=8080)
