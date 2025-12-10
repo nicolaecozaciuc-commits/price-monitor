@@ -39,20 +39,19 @@ def is_valid_domain(domain):
     match = re.match(r'^([a-z0-9-]+)\.ro$', domain)
     return match and len(match.group(1)) >= 3
 
-def extract_from_bing_serp(page, sku):
-    """Extrage prețuri și site-uri DIRECT din pagina Bing"""
+def extract_from_bing(page):
+    """Extrage prețuri din Bing - EXACT ca v7.2 care funcționa"""
     results = []
-    sku_lower = sku.lower()
     
     try:
-        # Parsează fiecare rezultat Bing
+        # Parsează rezultatele Bing
         for result in page.locator('.b_algo').all()[:15]:
             try:
-                # Extrage URL
-                link_el = result.locator('a').first
-                href = link_el.get_attribute('href') or ''
+                # URL
+                link = result.locator('a').first
+                href = link.get_attribute('href') or ''
                 
-                # Extrage domain
+                # Domain
                 domain_match = re.search(r'https?://(?:www\.)?([a-z0-9-]+\.ro)', href.lower())
                 if not domain_match:
                     continue
@@ -61,18 +60,11 @@ def extract_from_bing_serp(page, sku):
                 if not is_valid_domain(domain):
                     continue
                 
-                # Extrage tot textul din rezultat
-                result_text = result.inner_text()
-                
-                # Verifică dacă SKU apare în rezultat
-                if sku_lower not in result_text.lower():
-                    continue
-                
-                # Caută preț în text
-                price_matches = re.findall(r'([\d.,]+)\s*(?:RON|Lei|lei|Ron)', result_text)
-                
-                for price_str in price_matches:
-                    price = clean_price(price_str)
+                # Preț din text
+                text = result.inner_text()
+                price_match = re.search(r'([\d.,]+)\s*(?:RON|Lei|lei|Ron)', text)
+                if price_match:
+                    price = clean_price(price_match.group(1))
                     if price > 0:
                         results.append({
                             'name': domain,
@@ -81,13 +73,12 @@ def extract_from_bing_serp(page, sku):
                             'method': 'Bing'
                         })
                         logger.info(f"      ✓ {domain}: {price} Lei")
-                        break  # Un preț per rezultat
                         
             except:
                 continue
                 
-    except Exception as e:
-        logger.debug(f"Extract error: {e}")
+    except:
+        pass
     
     return results
 
@@ -108,8 +99,8 @@ def scan_product(sku, name, your_price=0):
         page = context.new_page()
         
         try:
-            # Bing search
-            query = f"{sku} pret RON"
+            # Bing search - EXACT ca v7.2
+            query = f"{sku} pret"
             url = f"https://www.bing.com/search?q={quote_plus(query)}"
             
             logger.info(f"   🔍 Bing: {query}")
@@ -124,10 +115,10 @@ def scan_product(sku, name, your_price=0):
             except:
                 pass
             
-            # Extrage din SERP
-            found = extract_from_bing_serp(page, sku)
+            # Extrage
+            found = extract_from_bing(page)
             
-            # Deduplicate by domain
+            # Deduplicate
             seen = {}
             unique = []
             for r in found:
@@ -136,7 +127,7 @@ def scan_product(sku, name, your_price=0):
                     unique.append(r)
             found = unique
             
-            logger.info(f"   📋 Găsite: {len(found)} rezultate")
+            logger.info(f"   📋 Găsite: {len(found)}")
             
         except Exception as e:
             logger.info(f"   ❌ Error: {str(e)[:50]}")
@@ -145,7 +136,6 @@ def scan_product(sku, name, your_price=0):
         
         browser.close()
     
-    # Calculează diferență
     for r in found:
         r['diff'] = round(((r['price'] - your_price) / your_price) * 100, 1) if your_price > 0 else 0
     
@@ -164,5 +154,5 @@ def api_check():
     return jsonify({"status": "success", "competitors": results})
 
 if __name__ == '__main__':
-    logger.info("🚀 PriceMonitor v7.7 (Bing SERP Direct) pe :8080")
+    logger.info("🚀 PriceMonitor v7.2-restored pe :8080")
     app.run(host='0.0.0.0', port=8080)
