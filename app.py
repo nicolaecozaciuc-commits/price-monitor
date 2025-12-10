@@ -151,16 +151,28 @@ def google_stealth_search(page, query, sku_for_match=None):
             if has_match and current_domain:
                 # Caută TOATE prețurile în context
                 context = ' '.join(lines[max(0,i-2):min(len(lines),i+3)])
-                price_matches = re.findall(r'([\d.,]+)\s*(?:RON|Lei|lei)', context, re.IGNORECASE)
                 
-                # Extrage toate prețurile valide
+                # Găsește prețuri CU contextul lor (pentru a detecta transport)
+                price_patterns = re.finditer(r'([\d.,]+)\s*(?:RON|Lei|lei)', context, re.IGNORECASE)
+                
                 valid_prices = []
-                for pm in price_matches:
-                    p = clean_price(pm)
-                    if p > 0:
-                        valid_prices.append(p)
+                for pm in price_patterns:
+                    price_value = clean_price(pm.group(1))
+                    if price_value <= 0:
+                        continue
+                    
+                    # Verifică dacă e preț de transport (20 caractere înainte și după)
+                    start = max(0, pm.start() - 25)
+                    end = min(len(context), pm.end() + 15)
+                    price_context = context[start:end].lower()
+                    
+                    transport_words = ['delivery', 'transport', 'livrare', 'shipping', 'expediere']
+                    is_transport = any(tw in price_context for tw in transport_words)
+                    
+                    if not is_transport:
+                        valid_prices.append(price_value)
                 
-                # Ia cel mai MIC preț (prețul real, nu PRP/preț vechi)
+                # Ia cel mai MIC preț care NU e transport
                 if valid_prices:
                     price = min(valid_prices)
                     # Verifică să nu fie duplicat
@@ -381,33 +393,6 @@ def scan_product(sku, name, your_price=0):
                             'method': 'Bing SERP'
                         })
             
-            # ========== PASUL 3: VIZITĂ SITE (doar dacă nu avem preț) ==========
-            # Colectăm site-urile care au SKU dar nu au preț
-            sites_to_visit = []
-            
-            for r in google_results:
-                if r['price'] == 0 and r['domain'] not in [f['name'] for f in found]:
-                    sites_to_visit.append(r['domain'])
-            
-            if len(found) < 3 and sites_to_visit:
-                logger.info(f"   🌐 Verificăm {len(sites_to_visit)} site-uri...")
-                
-                for domain in sites_to_visit[:3]:
-                    logger.info(f"      🔗 {domain}...")
-                    result = find_price_on_site(page, domain, sku, save_debug=True)
-                    
-                    if result:
-                        found.append({
-                            'name': domain,
-                            'price': result['price'],
-                            'url': result['url'],
-                            'method': 'Site Visit'
-                        })
-                        logger.info(f"      ✅ {result['price']} Lei")
-                    
-                    if len(found) >= 5:
-                        break
-            
             logger.info(f"   📊 Total: {len(found)}")
             
         except Exception as e:
@@ -420,17 +405,24 @@ def scan_product(sku, name, your_price=0):
     # Calculează diff pentru fiecare rezultat
     for r in found:
         r['diff'] = round(((r['price'] - your_price) / your_price) * 100, 1) if your_price > 0 else 0
+        # Marchează dacă e suspect (în afara ±30%)
+        if your_price > 0:
+            r['suspect'] = not (-30 <= r['diff'] <= 30)
+        else:
+            r['suspect'] = False
     
-    # FILTRU: păstrează doar rezultatele în intervalul ±30% față de prețul nostru
-    if your_price > 0:
-        before_filter = len(found)
-        found = [r for r in found if -30 <= r['diff'] <= 30]
-        filtered_count = before_filter - len(found)
-        if filtered_count > 0:
-            logger.info(f"   🔻 Filtrat {filtered_count} outliers (±30%)")
+    # Sortare: prețuri valide primele, apoi suspecte
+    valid = [r for r in found if not r['suspect']]
+    suspect = [r for r in found if r['suspect']]
     
-    found.sort(key=lambda x: x['price'])
-    return found[:5]
+    valid.sort(key=lambda x: x['price'])
+    suspect.sort(key=lambda x: x['price'])
+    
+    # Log câte sunt suspecte
+    if suspect:
+        logger.info(f"   ⚠️ {len(suspect)} prețuri suspecte (±30%)")
+    
+    return valid[:5] + suspect[:3]  # Max 5 valide + 3 suspecte
 
 
 @app.route('/')
@@ -452,5 +444,5 @@ def get_debug(filename):
     return "Not found", 404
 
 if __name__ == '__main__':
-    logger.info("🚀 PriceMonitor v10.0 (±30% Filter) pe :8080")
+    logger.info("🚀 PriceMonitor v10.1 (Transport Filter) pe :8080")
     app.run(host='0.0.0.0', port=8080)
