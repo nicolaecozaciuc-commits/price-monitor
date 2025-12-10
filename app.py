@@ -397,6 +397,26 @@ def google_stealth_search(page, query, sku_for_match=None, sku_name=None):
                 # Caută TOATE prețurile în context
                 context = ' '.join(lines[max(0,i-2):min(len(lines),i+3)])
                 
+                # SPECIAL GERMANQUALITY (V10.8): extract fără condiție SKU
+                if current_domain == 'germanquality.ro':
+                    gq_price = extract_germanquality_price(context)
+                    if gq_price and gq_price > 0:
+                        if not any(r['domain'] == current_domain for r in results):
+                            # V10.7: VALIDARE DIMENSIUNI
+                            if sku_name:
+                                dim_check = validate_dimensions(sku_name, context)
+                                if not dim_check['valid']:
+                                    logger.info(f"      🔴 {current_domain}: {gq_price} Lei - REJECTED (dims: {dim_check['reason']})")
+                                    continue
+                            
+                            results.append({
+                                'domain': current_domain,
+                                'price': gq_price,
+                                'source': 'Google SERP (GermanQuality)'
+                            })
+                            logger.info(f"      🟠 {current_domain}: {gq_price} Lei (GQ)")
+                        continue
+                
                 # SPECIAL FOGLIA: folosește metoda specifică
                 if current_domain == 'foglia.ro':
                     foglia_price = extract_foglia_price(context)
@@ -538,6 +558,33 @@ def google_stealth_search(page, query, sku_for_match=None, sku_name=None):
             
             # Dacă avem domain și suntem în range-ul de 6 linii
             if current_domain and domain_line >= 0 and i <= domain_line + 6:
+                # SPECIAL GERMANQUALITY (V10.8): extract fără condiție SKU
+                if current_domain == 'germanquality.ro' and not any(r['domain'] == current_domain for r in results):
+                    block_start = domain_line
+                    block_end = min(len(lines), domain_line + 7)
+                    block_text = ' '.join(lines[block_start:block_end])
+                    
+                    gq_price = extract_germanquality_price(block_text)
+                    if gq_price and gq_price > 0:
+                        # V10.7: VALIDARE DIMENSIUNI
+                        if sku_name:
+                            dim_check = validate_dimensions(sku_name, block_text)
+                            if not dim_check['valid']:
+                                logger.info(f"      🔴 {current_domain}: {gq_price} Lei - REJECTED (dims: {dim_check['reason']})")
+                                current_domain = None
+                                domain_line = -1
+                                continue
+                        
+                        results.append({
+                            'domain': current_domain,
+                            'price': gq_price,
+                            'source': 'Google SERP (GermanQuality)'
+                        })
+                        logger.info(f"      🟠 {current_domain}: {gq_price} Lei (GQ)")
+                        current_domain = None
+                        domain_line = -1
+                        continue
+                
                 # Verifică dacă SKU apare în această linie
                 query_lower = query.lower()
                 if query_lower in line_lower:
