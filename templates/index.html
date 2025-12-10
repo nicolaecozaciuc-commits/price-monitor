@@ -2,7 +2,7 @@
 <html lang="ro">
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>PriceMonitor v13.4</title>
+<title>PriceMonitor v2.0</title>
 <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -96,21 +96,15 @@ const Dashboard = () => {
             const headers = rows[0];
             const normHeaders = headers.map(h => normalize(h));
             console.log("=== DEBUG CSV ===");
-            console.log("Headers originale:", headers);
-            console.log("Headers normalizate:", normHeaders);
+            console.log("Headers:", headers);
             
             let iSku = findColumnIndex(normHeaders, ['sku', 'cod', 'codprodus']);
             let iName = findColumnIndex(normHeaders, ['nume', 'numeprodus', 'titlu', 'name', 'title']);
-            // PRIORITATE: pretobisnuit (Preț obișnuit) primul!
             let iPrice = findColumnIndex(normHeaders, ['pretobisnuit', 'regularprice'], ['promotional', 'promo', 'concurent']);
             if (iPrice === -1) iPrice = findColumnIndex(normHeaders, ['pret', 'price'], ['promotional', 'promo', 'concurent']);
             let iImg = findColumnIndex(normHeaders, ['imagini', 'images', 'imagine', 'poza', 'image']);
             
-            console.log("Index SKU:", iSku, "->", headers[iSku]);
-            console.log("Index Nume:", iName, "->", headers[iName]);
-            console.log("Index Pret:", iPrice, "->", headers[iPrice]);
-            console.log("Index Imagini:", iImg, "->", headers[iImg]);
-            
+            console.log("Index SKU:", iSku, "Nume:", iName, "Pret:", iPrice);
             if (iSku === -1) return alert("Nu găsesc coloana SKU!");
             
             const parsed = rows.slice(1).map((r, k) => {
@@ -120,11 +114,10 @@ const Dashboard = () => {
                 const price = (iPrice !== -1 && r[iPrice]) ? parsePrice(r[iPrice]) : 0;
                 const name = (iName !== -1 && r[iName]) ? r[iName] : '';
                 const sku = r[iSku].trim();
-                if (k === 0) console.log("Primul produs:", {sku, name, price, rawPrice: r[iPrice]});
                 return { id: k, sku, name, price, image: imgUrl, comps: [], lastCheck: null };
             }).filter(x => x && x.sku);
             
-            console.log("Produse parsate:", parsed.length, "Cu pret:", parsed.filter(p => p.price > 0).length);
+            console.log("Produse:", parsed.length, "Cu preț:", parsed.filter(p => p.price > 0).length);
             setProducts(parsed);
             setSelected(new Set());
             setStats({total: parsed.length, checked: 0, withPrice: parsed.filter(p => p.price > 0).length});
@@ -136,7 +129,11 @@ const Dashboard = () => {
         const p = products.find(x => x.id === id);
         setCheckingId(id);
         try {
-            const res = await fetch('/api/check', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({sku: p.sku, name: p.name}) });
+            const res = await fetch('/api/check', { 
+                method: 'POST', 
+                headers: {'Content-Type': 'application/json'}, 
+                body: JSON.stringify({sku: p.sku, name: p.name, price: p.price}) 
+            });
             const d = await res.json();
             if (d.status === 'success') {
                 setProducts(prev => prev.map(x => x.id === id ? { ...x, comps: d.competitors, lastCheck: new Date().toLocaleTimeString() } : x));
@@ -159,20 +156,25 @@ const Dashboard = () => {
             if (stopSignal.current) { setProgress(null); setAutoStart(false); alert("🛑 Scanare oprită."); return; }
             if (i >= queueIds.length) { setProgress(null); alert("✅ Scanare completă!"); return; }
             setProgress({cur: i + 1, tot: queueIds.length});
-            check(queueIds[i]).then(() => { i++; setTimeout(next, 2500); });
+            check(queueIds[i]).then(() => { i++; setTimeout(next, 5000); }); // 5s între produse (Google e lent)
         };
         next();
     };
 
     const runSelected = () => runScanQueue(Array.from(selected));
-    const runAll = () => { if (confirm(`Scanezi toate ${products.length} produse?`)) runScanQueue(products.map(p => p.id)); };
+    const runAll = () => { if (confirm(`Scanezi toate ${products.length} produse? (Va dura ~${Math.round(products.length * 0.5)} min)`)) runScanQueue(products.map(p => p.id)); };
 
     const exportResults = () => {
         const checkedProducts = products.filter(p => p.comps && p.comps.length > 0);
         if (!checkedProducts.length) return alert("Nu sunt rezultate de exportat!");
-        let csv = "SKU,Nume,Pret Tau,Competitor 1,Pret 1,Competitor 2,Pret 2,Competitor 3,Pret 3\n";
+        let csv = "SKU,Nume,Pret Tau,Site 1,Pret 1,Diff 1,Site 2,Pret 2,Diff 2,Site 3,Pret 3,Diff 3\n";
         checkedProducts.forEach(p => {
-            csv += [p.sku, `"${p.name.replace(/"/g, '""')}"`, p.price, p.comps[0]?.name||'', p.comps[0]?.price||'', p.comps[1]?.name||'', p.comps[1]?.price||'', p.comps[2]?.name||'', p.comps[2]?.price||''].join(',') + '\n';
+            csv += [
+                p.sku, `"${p.name.replace(/"/g, '""')}"`, p.price,
+                p.comps[0]?.name||'', p.comps[0]?.price||'', p.comps[0]?.diff ? `${p.comps[0].diff}%` : '',
+                p.comps[1]?.name||'', p.comps[1]?.price||'', p.comps[1]?.diff ? `${p.comps[1].diff}%` : '',
+                p.comps[2]?.name||'', p.comps[2]?.price||'', p.comps[2]?.diff ? `${p.comps[2].diff}%` : ''
+            ].join(',') + '\n';
         });
         const blob = new Blob([csv], {type: 'text/csv;charset=utf-8;'});
         const link = document.createElement('a');
@@ -195,13 +197,26 @@ const Dashboard = () => {
         return () => clearInterval(timer);
     }, [autoStart, targetTime, products, progress, lastRunDate]);
 
+    // Format diferență cu culoare
+    const DiffBadge = ({diff}) => {
+        if (diff === undefined || diff === null) return null;
+        const isNegative = diff < 0;
+        const isPositive = diff > 0;
+        const color = isNegative ? 'bg-green-600' : isPositive ? 'bg-red-600' : 'bg-gray-600';
+        return (
+            <span className={`${color} text-white text-[10px] px-1.5 py-0.5 rounded font-bold`}>
+                {diff > 0 ? '+' : ''}{diff}%
+            </span>
+        );
+    };
+
     return (
         <div className="p-4 md:p-6 max-w-[98%] mx-auto">
             <div className="bg-[#1a1a1a] p-4 md:p-6 rounded-xl border border-[#333] mb-6">
                 <div className="flex flex-wrap justify-between items-center gap-4">
                     <div>
-                        <h1 className="text-xl md:text-2xl font-bold text-white flex gap-2"><span>📊</span> PriceMonitor v13.4</h1>
-                        <p className="text-gray-500 text-xs md:text-sm">Sortare Automată la Stop • Imagini • Feedback</p>
+                        <h1 className="text-xl md:text-2xl font-bold text-white flex gap-2"><span>📊</span> PriceMonitor v2.0</h1>
+                        <p className="text-gray-500 text-xs md:text-sm">Google Search + Direct Extraction • {stats.total} produse • {stats.checked} verificate</p>
                     </div>
                     <div className="flex items-center gap-2 bg-[#222] p-2 rounded-lg border border-[#444]">
                         <span className="text-gray-400 text-sm">⏰</span>
@@ -233,7 +248,7 @@ const Dashboard = () => {
                             <th className="p-3 w-12 text-center"><input type="checkbox" onChange={toggleAll} checked={products.length > 0 && selected.size === products.length}/></th>
                             <th className="p-3">PRODUS</th>
                             <th className="p-3 w-28">PREȚUL TĂU</th>
-                            <th className="p-3">CONCURENȚĂ (DIRECT)</th>
+                            <th className="p-3">CONCURENȚĂ (Google + Direct)</th>
                             <th className="p-3 w-20 text-center">ACȚIUNI</th>
                         </tr>
                     </thead>
@@ -258,7 +273,7 @@ const Dashboard = () => {
                                             </div>
                                         </div>
                                     </td>
-                                    <td className="p-3"><span className={`text-lg font-bold ${isCheaperThanAll ? 'text-green-400' : 'text-emerald-400'}`}>{p.price > 0 ? `${p.price.toLocaleString('ro-RO')} Lei` : '0 Lei'}</span></td>
+                                    <td className="p-3"><span className={`text-lg font-bold ${isCheaperThanAll ? 'text-green-400' : 'text-emerald-400'}`}>{p.price > 0 ? `${p.price.toLocaleString('ro-RO')} Lei` : '-'}</span></td>
                                     <td className="p-3">
                                         {p.comps && p.comps.length > 0 ? (
                                             <div className="flex flex-wrap gap-2">
@@ -266,15 +281,24 @@ const Dashboard = () => {
                                                     const isCheaper = p.price > 0 && c.price < p.price;
                                                     const isLowest = c.price === minCompPrice;
                                                     return (
-                                                        <div key={k} className={`p-2 rounded border min-w-[100px] relative ${isCheaper ? 'bg-red-900/30 border-red-700' : 'bg-green-900/20 border-green-800'} ${isLowest ? 'ring-1 ring-yellow-500' : ''}`}>
-                                                            <div className="font-bold text-xs text-gray-400 truncate">{c.name}</div>
-                                                            <div className={`text-base font-bold ${isCheaper ? 'text-red-400' : 'text-green-400'}`}>{c.price.toLocaleString('ro-RO')}</div>
-                                                            <a href={c.url} target="_blank" rel="noopener noreferrer" className="text-[10px] text-blue-400 hover:underline">Link ↗</a>
+                                                        <div key={k} className={`p-2 rounded border min-w-[120px] ${isCheaper ? 'bg-red-900/30 border-red-700' : 'bg-green-900/20 border-green-800'} ${isLowest ? 'ring-2 ring-yellow-500' : ''}`}>
+                                                            <div className="flex justify-between items-start gap-2">
+                                                                <span className="font-bold text-xs text-gray-400 truncate max-w-[80px]" title={c.name}>{c.name}</span>
+                                                                <DiffBadge diff={c.diff} />
+                                                            </div>
+                                                            <div className={`text-lg font-bold ${isCheaper ? 'text-red-400' : 'text-green-400'}`}>
+                                                                {c.price.toLocaleString('ro-RO')} <span className="text-xs">Lei</span>
+                                                            </div>
+                                                            <a href={c.url} target="_blank" rel="noopener noreferrer" className="text-[10px] text-blue-400 hover:underline block truncate" title={c.url}>🔗 vezi oferta</a>
                                                         </div>
                                                     );
                                                 })}
                                             </div>
-                                        ) : <span className="text-gray-600 text-xs">—</span>}
+                                        ) : checkingId === p.id ? (
+                                            <span className="text-blue-400 text-xs animate-pulse">⏳ Scanare Google...</span>
+                                        ) : (
+                                            <span className="text-gray-600 text-xs">—</span>
+                                        )}
                                     </td>
                                     <td className="p-3 text-center"><button onClick={() => check(p.id)} disabled={checkingId === p.id} className="text-blue-400 border border-blue-900/50 hover:bg-blue-900/30 px-3 py-2 rounded transition disabled:opacity-50">{checkingId === p.id ? '⏳' : '🔍'}</button></td>
                                 </tr>
