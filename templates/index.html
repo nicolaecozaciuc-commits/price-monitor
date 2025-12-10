@@ -2,16 +2,14 @@
 <html lang="ro">
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>PriceMonitor v2.0</title>
+<title>Price Monitor v15 - Hybrid AI</title>
 <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 <script src="https://cdn.tailwindcss.com"></script>
 <style>
-body{background:#0f0f0f;color:#e0e0e0;font-family:sans-serif}
+body{background:#0f0f0f;color:#e0e0e0;font-family:'Segoe UI',sans-serif}
 .animate-pulse{animation:p 2s infinite}@keyframes p{0%,100%{opacity:1}50%{opacity:.5}}
-input[type="checkbox"] { accent-color: #2563eb; width: 18px; height: 18px; cursor: pointer; }
-::-webkit-scrollbar{width:8px}::-webkit-scrollbar-track{background:#1a1a1a}::-webkit-scrollbar-thumb{background:#333;border-radius:4px}
 </style>
 </head>
 <body><div id="root"></div><script type="text/babel">
@@ -22,295 +20,136 @@ const Dashboard = () => {
     const [selected, setSelected] = useState(new Set()); 
     const [checkingId, setCheckingId] = useState(null);
     const [progress, setProgress] = useState(null);
-    const [targetTime, setTargetTime] = useState("02:00");
-    const [autoStart, setAutoStart] = useState(false);
-    const [lastRunDate, setLastRunDate] = useState(null);
-    const [stats, setStats] = useState({total: 0, checked: 0, withPrice: 0});
     const stopSignal = useRef(false);
 
-    const normalize = (str) => {
-        if (!str) return "";
-        return str.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]/g, "");
-    };
-
     const parseCSV = (text) => {
-        const rows = [];
-        let currentRow = [];
-        let currentCell = '';
-        let inQuotes = false;
-        if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
-        for (let i = 0; i < text.length; i++) {
-            const char = text[i];
-            const nextChar = text[i + 1];
-            if (char === '"') {
-                if (inQuotes && nextChar === '"') { currentCell += '"'; i++; }
-                else { inQuotes = !inQuotes; }
-            } else if (char === ',' && !inQuotes) {
-                currentRow.push(currentCell.trim());
-                currentCell = '';
-            } else if ((char === '\n' || char === '\r') && !inQuotes) {
-                if (char === '\r' && nextChar === '\n') i++;
-                currentRow.push(currentCell.trim());
-                if (currentRow.length > 1 || currentRow[0] !== '') rows.push(currentRow);
-                currentRow = [];
-                currentCell = '';
-            } else {
-                currentCell += char;
-            }
-        }
-        if (currentCell || currentRow.length > 0) { currentRow.push(currentCell.trim()); rows.push(currentRow); }
+        const rows = []; let cur = []; let cell = ''; let q = false;
+        text.replace(/\r\n/g,'\n').replace(/\r/g,'\n').split('').forEach(c => {
+            if(c === '"') q = !q; else if(c === ',' && !q) { cur.push(cell); cell = ''; }
+            else if(c === '\n' && !q) { cur.push(cell); rows.push(cur); cur = []; cell = ''; }
+            else cell += c;
+        });
+        if(cell || cur.length) { cur.push(cell); rows.push(cur); }
         return rows;
     };
 
-    const parsePrice = (p) => {
-        if (!p || p === '') return 0;
-        let c = String(p).trim();
-        if (c.includes(',') && c.indexOf(',') > c.lastIndexOf('.')) {
-            c = c.replace(/\./g, '').replace(',', '.');
-        } else if (c.includes(',')) {
-            c = c.replace(',', '.');
-        }
-        const num = parseFloat(c.replace(/[^0-9.]/g, ''));
-        return isNaN(num) ? 0 : num;
-    };
-
-    const findColumnIndex = (normHeaders, searchTerms, excludeTerms = []) => {
-        for (const term of searchTerms) {
-            const idx = normHeaders.findIndex((h) => {
-                const matches = h.includes(term) || h === term;
-                const excluded = excludeTerms.some(ex => h.includes(ex));
-                return matches && !excluded;
-            });
-            if (idx !== -1) return idx;
-        }
-        return -1;
-    };
-
     const handleUpload = (e) => {
-        const file = e.target.files[0];
-        if (!file) return;
         const reader = new FileReader();
         reader.onload = (evt) => {
             const rows = parseCSV(evt.target.result);
-            if (rows.length < 2) return alert("CSV Invalid sau gol");
-            const headers = rows[0];
-            const normHeaders = headers.map(h => normalize(h));
-            console.log("=== DEBUG CSV ===");
-            console.log("Headers:", headers);
+            if(rows.length < 2) return alert("CSV Invalid");
+            const h = rows[0].map(x => x.toLowerCase().replace(/[^a-z0-9]/g, ''));
+            let iSku = h.findIndex(x => x.includes('sku'));
+            let iName = h.findIndex(x => x.includes('nume'));
+            let iImg = h.findIndex(x => x.includes('imagini') || x.includes('images'));
+            let iPrice = h.indexOf('pretnostru');
+            if(iPrice === -1) iPrice = h.findIndex(x => x.includes('pretobisnuit'));
+
+            if(iSku === -1) return alert("Nu gasesc SKU");
             
-            let iSku = findColumnIndex(normHeaders, ['sku', 'cod', 'codprodus']);
-            let iName = findColumnIndex(normHeaders, ['nume', 'numeprodus', 'titlu', 'name', 'title']);
-            let iPrice = findColumnIndex(normHeaders, ['pretobisnuit', 'regularprice'], ['promotional', 'promo', 'concurent']);
-            if (iPrice === -1) iPrice = findColumnIndex(normHeaders, ['pret', 'price'], ['promotional', 'promo', 'concurent']);
-            let iImg = findColumnIndex(normHeaders, ['imagini', 'images', 'imagine', 'poza', 'image']);
-            
-            console.log("Index SKU:", iSku, "Nume:", iName, "Pret:", iPrice);
-            if (iSku === -1) return alert("Nu găsesc coloana SKU!");
-            
-            const parsed = rows.slice(1).map((r, k) => {
-                if (r.length <= iSku || !r[iSku]) return null;
-                let imgUrl = null;
-                if (iImg !== -1 && r[iImg]) imgUrl = r[iImg].split(',')[0].trim();
-                const price = (iPrice !== -1 && r[iPrice]) ? parsePrice(r[iPrice]) : 0;
-                const name = (iName !== -1 && r[iName]) ? r[iName] : '';
-                const sku = r[iSku].trim();
-                return { id: k, sku, name, price, image: imgUrl, comps: [], lastCheck: null };
-            }).filter(x => x && x.sku);
-            
-            console.log("Produse:", parsed.length, "Cu preț:", parsed.filter(p => p.price > 0).length);
-            setProducts(parsed);
-            setSelected(new Set());
-            setStats({total: parsed.length, checked: 0, withPrice: parsed.filter(p => p.price > 0).length});
+            setProducts(rows.slice(1).map((r, k) => {
+                if(r.length <= iSku) return null;
+                let imgUrl = (iImg !== -1 && r[iImg]) ? r[iImg].split(',')[0].trim() : null;
+                let p = (iPrice !== -1 && r[iPrice]) ? parseFloat(r[iPrice].replace(/\./g,'').replace(',','.')) || 0 : 0;
+                return {id: k, sku: r[iSku], name: r[iName]||'', price: p, image: imgUrl, comps: []};
+            }).filter(x => x && x.sku));
         };
-        reader.readAsText(file, 'UTF-8');
+        reader.readAsText(e.target.files[0]);
     };
 
     const check = async (id) => {
         const p = products.find(x => x.id === id);
         setCheckingId(id);
         try {
-            const res = await fetch('/api/check', { 
-                method: 'POST', 
-                headers: {'Content-Type': 'application/json'}, 
-                body: JSON.stringify({sku: p.sku, name: p.name, price: p.price}) 
-            });
+            const res = await fetch('/api/check', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(p)});
             const d = await res.json();
-            if (d.status === 'success') {
-                setProducts(prev => prev.map(x => x.id === id ? { ...x, comps: d.competitors, lastCheck: new Date().toLocaleTimeString() } : x));
-                setStats(prev => ({...prev, checked: prev.checked + 1}));
-            }
+            if(d.status === 'success') setProducts(prev => prev.map(x => x.id === id ? {...x, comps: d.competitors} : x));
         } catch(e) { console.error(e); }
         finally { setCheckingId(null); }
     };
 
-    const handleStop = () => { if (confirm("Oprești scanarea?")) stopSignal.current = true; };
-    const toggleSelect = (id) => { const newSel = new Set(selected); if (newSel.has(id)) newSel.delete(id); else newSel.add(id); setSelected(newSel); };
-    const toggleAll = () => { if (selected.size === products.length) setSelected(new Set()); else setSelected(new Set(products.map(p => p.id))); };
+    const toggleSelect = (id) => {
+        const newSel = new Set(selected);
+        if(newSel.has(id)) newSel.delete(id); else newSel.add(id);
+        setSelected(newSel);
+    };
 
     const runScanQueue = (queueIds) => {
-        if (!queueIds.length) return alert("Nimic de scanat!");
+        if(!queueIds.length) return alert("Nimic selectat!");
         stopSignal.current = false;
-        setProgress({cur: 0, tot: queueIds.length});
+        setProgress({cur:0, tot:queueIds.length});
         let i = 0;
         const next = () => {
-            if (stopSignal.current) { setProgress(null); setAutoStart(false); alert("🛑 Scanare oprită."); return; }
-            if (i >= queueIds.length) { setProgress(null); alert("✅ Scanare completă!"); return; }
-            setProgress({cur: i + 1, tot: queueIds.length});
-            check(queueIds[i]).then(() => { i++; setTimeout(next, 5000); }); // 5s între produse (Google e lent)
+            if (stopSignal.current) { setProgress(null); alert("🛑 Oprit."); return; }
+            if(i >= queueIds.length) { setProgress(null); alert("✅ Finalizat!"); return; }
+            setProgress({cur:i+1, tot:queueIds.length});
+            check(queueIds[i]).then(() => { i++; setTimeout(next, 2000); });
         };
         next();
     };
 
-    const runSelected = () => runScanQueue(Array.from(selected));
-    const runAll = () => { if (confirm(`Scanezi toate ${products.length} produse? (Va dura ~${Math.round(products.length * 0.5)} min)`)) runScanQueue(products.map(p => p.id)); };
-
-    const exportResults = () => {
-        const checkedProducts = products.filter(p => p.comps && p.comps.length > 0);
-        if (!checkedProducts.length) return alert("Nu sunt rezultate de exportat!");
-        let csv = "SKU,Nume,Pret Tau,Site 1,Pret 1,Diff 1,Site 2,Pret 2,Diff 2,Site 3,Pret 3,Diff 3\n";
-        checkedProducts.forEach(p => {
-            csv += [
-                p.sku, `"${p.name.replace(/"/g, '""')}"`, p.price,
-                p.comps[0]?.name||'', p.comps[0]?.price||'', p.comps[0]?.diff ? `${p.comps[0].diff}%` : '',
-                p.comps[1]?.name||'', p.comps[1]?.price||'', p.comps[1]?.diff ? `${p.comps[1].diff}%` : '',
-                p.comps[2]?.name||'', p.comps[2]?.price||'', p.comps[2]?.diff ? `${p.comps[2].diff}%` : ''
-            ].join(',') + '\n';
-        });
-        const blob = new Blob([csv], {type: 'text/csv;charset=utf-8;'});
-        const link = document.createElement('a');
-        link.href = URL.createObjectURL(blob);
-        link.download = `rezultate_${new Date().toISOString().slice(0,10)}.csv`;
-        link.click();
-    };
-
-    useEffect(() => {
-        const timer = setInterval(() => {
-            if (autoStart && !progress && products.length > 0) {
-                const now = new Date();
-                const cur = now.getHours().toString().padStart(2, '0') + ":" + now.getMinutes().toString().padStart(2, '0');
-                if (cur === targetTime && lastRunDate !== now.toDateString()) {
-                    setLastRunDate(now.toDateString());
-                    runScanQueue(products.map(p => p.id));
-                }
-            }
-        }, 1000);
-        return () => clearInterval(timer);
-    }, [autoStart, targetTime, products, progress, lastRunDate]);
-
-    // Format diferență cu culoare
-    const DiffBadge = ({diff}) => {
-        if (diff === undefined || diff === null) return null;
-        const isNegative = diff < 0;
-        const isPositive = diff > 0;
-        const color = isNegative ? 'bg-green-600' : isPositive ? 'bg-red-600' : 'bg-gray-600';
-        return (
-            <span className={`${color} text-white text-[10px] px-1.5 py-0.5 rounded font-bold`}>
-                {diff > 0 ? '+' : ''}{diff}%
-            </span>
-        );
-    };
-
     return (
-        <div className="p-4 md:p-6 max-w-[98%] mx-auto">
-            <div className="bg-[#1a1a1a] p-4 md:p-6 rounded-xl border border-[#333] mb-6">
-                <div className="flex flex-wrap justify-between items-center gap-4">
-                    <div>
-                        <h1 className="text-xl md:text-2xl font-bold text-white flex gap-2"><span>📊</span> PriceMonitor v2.0</h1>
-                        <p className="text-gray-500 text-xs md:text-sm">Google Search + Direct Extraction • {stats.total} produse • {stats.checked} verificate</p>
-                    </div>
-                    <div className="flex items-center gap-2 bg-[#222] p-2 rounded-lg border border-[#444]">
-                        <span className="text-gray-400 text-sm">⏰</span>
-                        <input type="time" value={targetTime} onChange={(e) => setTargetTime(e.target.value)} className="bg-[#333] text-white px-2 py-1 rounded border border-[#555] text-sm w-24" disabled={autoStart}/>
-                        <button onClick={() => setAutoStart(!autoStart)} className={`px-3 py-1 rounded text-xs font-bold transition ${autoStart ? 'bg-green-600 text-white animate-pulse' : 'bg-gray-600 text-gray-300 hover:bg-gray-500'}`}>{autoStart ? 'ON' : 'OFF'}</button>
-                    </div>
-                    <div className="flex gap-2 flex-wrap">
-                        {progress ? (
-                            <div className="flex items-center gap-3">
-                                <span className="text-blue-400 font-mono animate-pulse">{progress.cur}/{progress.tot}</span>
-                                <button onClick={handleStop} className="bg-red-600 px-4 py-2 rounded text-white font-bold hover:bg-red-700 border border-red-500">🛑 STOP</button>
-                            </div>
-                        ) : (
-                            <>
-                                <label className="bg-[#333] px-4 py-2 rounded cursor-pointer hover:bg-[#444] text-white border border-[#555] text-sm font-bold transition">📂 CSV<input type="file" accept=".csv" onChange={handleUpload} className="hidden"/></label>
-                                {selected.size > 0 && <button onClick={runSelected} className="bg-green-600 px-4 py-2 rounded text-white font-bold hover:bg-green-700 border border-green-500">✅ Scanează {selected.size}</button>}
-                                <button onClick={runAll} disabled={!products.length} className="bg-blue-600 px-4 py-2 rounded text-white font-bold hover:bg-blue-700 disabled:opacity-50 border border-blue-500 transition">🚀 Scanează TOT</button>
-                                {products.some(p => p.comps?.length > 0) && <button onClick={exportResults} className="bg-purple-600 px-4 py-2 rounded text-white font-bold hover:bg-purple-700 border border-purple-500 transition">📥 Export</button>}
-                            </>
-                        )}
-                    </div>
+        <div className="p-6 max-w-[95%] mx-auto">
+            <div className="bg-[#1a1a1a] p-6 rounded-xl border border-[#333] mb-6 flex justify-between items-center">
+                <div>
+                    <h1 className="text-2xl font-bold text-white flex gap-2"><span>📊</span> PriceMonitor v15</h1>
+                    <p className="text-gray-500 text-sm">Hybrid Engine: JSON-LD + Visual Fallback</p>
+                </div>
+                <div className="flex gap-3">
+                    {progress ? (
+                        <div className="flex items-center gap-3">
+                            <span className="text-blue-400 font-mono animate-pulse">Progres: {progress.cur}/{progress.tot}</span>
+                            <button onClick={()=>{stopSignal.current=true}} className="bg-red-600 px-4 py-2 rounded text-white font-bold">🛑 STOP</button>
+                        </div>
+                    ) : (
+                        <div className="flex gap-3 items-center">
+                            <label className="bg-[#333] px-4 py-2 rounded cursor-pointer text-white text-sm font-bold border border-[#555]">📂 CSV <input type="file" onChange={handleUpload} className="hidden"/></label>
+                            <button onClick={() => runScanQueue(selected.size > 0 ? Array.from(selected) : products.map(p=>p.id))} disabled={!products.length} className="bg-blue-600 px-4 py-2 rounded text-white font-bold hover:bg-blue-700 disabled:opacity-50">
+                                {selected.size > 0 ? `🚀 Scanează ${selected.size} Selectate` : '🚀 Scanează TOT'}
+                            </button>
+                        </div>
+                    )}
                 </div>
             </div>
 
-            <div className="bg-[#1a1a1a] rounded-xl border border-[#333] overflow-x-auto">
+            <div className="bg-[#1a1a1a] rounded-xl border border-[#333] overflow-hidden">
                 <table className="w-full text-left text-sm text-gray-300">
-                    <thead className="bg-black text-gray-500 uppercase text-xs">
+                    <thead className="bg-black text-gray-500 uppercase">
                         <tr>
-                            <th className="p-3 w-12 text-center"><input type="checkbox" onChange={toggleAll} checked={products.length > 0 && selected.size === products.length}/></th>
-                            <th className="p-3">PRODUS</th>
-                            <th className="p-3 w-28">PREȚUL TĂU</th>
-                            <th className="p-3">CONCURENȚĂ (Google + Direct)</th>
-                            <th className="p-3 w-20 text-center">ACȚIUNI</th>
+                            <th className="p-4 w-12"><input type="checkbox" onChange={(e)=>{
+                                if(e.target.checked) setSelected(new Set(products.map(p=>p.id))); else setSelected(new Set());
+                            }} /></th>
+                            <th className="p-4 w-1/4">Produs</th>
+                            <th className="p-4 w-32">Preț Tău</th>
+                            <th className="p-4">Rezultate (Hibrid)</th>
+                            <th className="p-4 w-24">Acțiuni</th>
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-[#2a2a2a]">
-                        {products.length === 0 ? (
-                            <tr><td colSpan="5" className="p-8 text-center text-gray-500">📂 Încarcă un fișier CSV pentru a începe</td></tr>
-                        ) : products.map(p => {
-                            const minCompPrice = p.comps?.length > 0 ? Math.min(...p.comps.map(c => c.price)) : null;
-                            const isCheaperThanAll = minCompPrice && p.price > 0 && p.price <= minCompPrice;
-                            return (
-                                <tr key={p.id} className={`hover:bg-[#222] transition ${selected.has(p.id) ? 'bg-[#2a2a35]' : ''} ${checkingId === p.id ? 'bg-blue-900/20' : ''}`}>
-                                    <td className="p-3 text-center"><input type="checkbox" checked={selected.has(p.id)} onChange={() => toggleSelect(p.id)}/></td>
-                                    <td className="p-3">
-                                        <div className="flex items-start gap-3">
-                                            <div className="w-14 h-14 bg-white rounded flex items-center justify-center overflow-hidden border border-gray-600 shrink-0">
-                                                {p.image ? <img src={p.image} className="w-full h-full object-contain" onError={(e) => e.target.style.display='none'}/> : <span className="text-xl">📦</span>}
-                                            </div>
-                                            <div className="min-w-0">
-                                                <div className="font-bold text-white text-sm truncate max-w-xs" title={p.name}>{p.name || 'Fără nume'}</div>
-                                                <div className="text-xs bg-[#333] px-2 py-0.5 rounded inline-block font-mono text-gray-400 mt-1">{p.sku}</div>
-                                                {p.lastCheck && <div className="text-[10px] text-green-400 mt-1">✓ {p.lastCheck}</div>}
-                                            </div>
+                        {products.map(p => (
+                            <tr key={p.id} className={`hover:bg-[#222] ${selected.has(p.id) ? 'bg-[#2a2a35]' : ''} ${checkingId === p.id ? 'bg-blue-900/10' : ''}`}>
+                                <td className="p-4 text-center"><input type="checkbox" checked={selected.has(p.id)} onChange={() => toggleSelect(p.id)} /></td>
+                                <td className="p-4 align-top">
+                                    <div className="flex items-start gap-3">
+                                        <div className="w-16 h-16 bg-white rounded flex items-center justify-center overflow-hidden border border-gray-600 shrink-0">
+                                            {p.image ? (<img src={p.image} className="w-full h-full object-contain" onError={(e) => e.target.style.display='none'} />) : (<span className="text-2xl">📦</span>)}
                                         </div>
-                                    </td>
-                                    <td className="p-3"><span className={`text-lg font-bold ${isCheaperThanAll ? 'text-green-400' : 'text-emerald-400'}`}>{p.price > 0 ? `${p.price.toLocaleString('ro-RO')} Lei` : '-'}</span></td>
-                                    <td className="p-3">
-                                        {p.comps && p.comps.length > 0 ? (
-                                            <div className="flex flex-wrap gap-2">
-                                                {p.comps.map((c, k) => {
-                                                    const isCheaper = p.price > 0 && c.price < p.price;
-                                                    const isLowest = c.price === minCompPrice;
-                                                    return (
-                                                        <div key={k} className={`p-2 rounded border min-w-[120px] ${isCheaper ? 'bg-red-900/30 border-red-700' : 'bg-green-900/20 border-green-800'} ${isLowest ? 'ring-2 ring-yellow-500' : ''}`}>
-                                                            <div className="flex justify-between items-start gap-2">
-                                                                <span className="font-bold text-xs text-gray-400 truncate max-w-[80px]" title={c.name}>{c.name}</span>
-                                                                <DiffBadge diff={c.diff} />
-                                                            </div>
-                                                            <div className={`text-lg font-bold ${isCheaper ? 'text-red-400' : 'text-green-400'}`}>
-                                                                {c.price.toLocaleString('ro-RO')} <span className="text-xs">Lei</span>
-                                                            </div>
-                                                            <a href={c.url} target="_blank" rel="noopener noreferrer" className="text-[10px] text-blue-400 hover:underline block truncate" title={c.url}>🔗 vezi oferta</a>
-                                                        </div>
-                                                    );
-                                                })}
-                                            </div>
-                                        ) : checkingId === p.id ? (
-                                            <span className="text-blue-400 text-xs animate-pulse">⏳ Scanare Google...</span>
-                                        ) : (
-                                            <span className="text-gray-600 text-xs">—</span>
-                                        )}
-                                    </td>
-                                    <td className="p-3 text-center"><button onClick={() => check(p.id)} disabled={checkingId === p.id} className="text-blue-400 border border-blue-900/50 hover:bg-blue-900/30 px-3 py-2 rounded transition disabled:opacity-50">{checkingId === p.id ? '⏳' : '🔍'}</button></td>
-                                </tr>
-                            );
-                        })}
+                                        <div><div className="font-bold text-white mb-1 text-sm">{p.name}</div><div className="text-xs bg-[#333] px-2 py-1 rounded inline-block font-mono text-gray-400">{p.sku}</div></div>
+                                    </div>
+                                </td>
+                                <td className="p-4 align-top text-xl font-bold text-emerald-400">{p.price} Lei</td>
+                                <td className="p-4">
+                                    {p.comps && p.comps.length > 0 ? (<div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-2">{p.comps.map((c,k) => {const isCheaper = c.price < p.price || p.price === 0; return (<div key={k} className={`p-2 rounded border ${isCheaper ? 'bg-red-900/20 border-red-800' : 'bg-green-900/20 border-green-800'} relative`}><div className="font-bold text-xs mb-1 text-gray-400 flex justify-between"><span>{c.name}</span><span className="text-[9px] text-gray-500 border border-gray-600 px-1 rounded">{c.method}</span></div><div className={`text-lg font-bold ${isCheaper ? 'text-red-400' : 'text-green-400'}`}>{c.price}</div><a href={c.url} target="_blank" className="text-[10px] text-blue-400 hover:underline block mt-1 truncate">Link ↗</a></div>)})}</div>) : <span className="text-gray-600 italic text-xs">...</span>}
+                                </td>
+                                <td className="p-4 align-top"><button onClick={() => check(p.id)} disabled={checkingId === p.id} className="text-blue-400 border border-blue-900/50 hover:bg-blue-900/20 px-3 py-2 rounded w-full transition">{checkingId === p.id ? '⏳' : '🔍'}</button></td>
+                            </tr>
+                        ))}
                     </tbody>
                 </table>
             </div>
         </div>
     );
 };
-
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(<Dashboard />);
 </script></body></html>
