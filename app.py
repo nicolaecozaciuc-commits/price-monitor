@@ -27,7 +27,7 @@ SEARCH_URLS = {
     'germanquality.ro': 'https://www.germanquality.ro/catalogsearch/result/?q={}',
     'sensodays.ro': 'https://www.sensodays.ro/catalogsearch/result/?q={}',
     'foglia.ro': 'https://www.foglia.ro/catalogsearch/result/?q={}',
-    'bagno.ro': 'https://www.bagno.ro/catalogsearch/result/?q={}',
+    'bagno.ro': 'https://www.bagno.ro/c?query={}',
     'romstal.ro': 'https://www.romstal.ro/cautare?q={}',
     'compari.ro': 'https://www.compari.ro/search/?q={}',
     'ideal-standard.ro': 'https://www.ideal-standard.ro/ro/search?text={}',
@@ -35,6 +35,8 @@ SEARCH_URLS = {
     'dedeman.ro': 'https://www.dedeman.ro/ro/cautare?query={}',
     'baterii-lux.ro': 'https://www.baterii-lux.ro/cautare?controller=search&s={}',
     'badehaus.ro': 'https://www.badehaus.ro/cautare?search={}',
+    'vasetoaleta.ro': 'https://www.vasetoaleta.ro/search?q={}',
+    'decostores.ro': 'https://www.decostores.ro/search?q={}',
 }
 
 def clean_price(value):
@@ -135,21 +137,28 @@ def google_stealth_search(page, sku):
             
             # Dacă linia conține SKU
             if sku.lower() in line_lower and current_domain:
-                # Caută preț în această linie sau în apropiere
+                # Caută TOATE prețurile în context
                 context = ' '.join(lines[max(0,i-2):min(len(lines),i+3)])
-                price_match = re.search(r'([\d.,]+)\s*(?:RON|Lei|lei)', context)
+                price_matches = re.findall(r'([\d.,]+)\s*(?:RON|Lei|lei)', context, re.IGNORECASE)
                 
-                if price_match:
-                    price = clean_price(price_match.group(1))
-                    if price > 0:
-                        # Verifică să nu fie duplicat
-                        if not any(r['domain'] == current_domain for r in results):
-                            results.append({
-                                'domain': current_domain,
-                                'price': price,
-                                'source': 'Google SERP'
-                            })
-                            logger.info(f"      🟢 {current_domain}: {price} Lei")
+                # Extrage toate prețurile valide
+                valid_prices = []
+                for pm in price_matches:
+                    p = clean_price(pm)
+                    if p > 0:
+                        valid_prices.append(p)
+                
+                # Ia cel mai MIC preț (prețul real, nu PRP/preț vechi)
+                if valid_prices:
+                    price = min(valid_prices)
+                    # Verifică să nu fie duplicat
+                    if not any(r['domain'] == current_domain for r in results):
+                        results.append({
+                            'domain': current_domain,
+                            'price': price,
+                            'source': 'Google SERP'
+                        })
+                        logger.info(f"      🟢 {current_domain}: {price} Lei")
         
         logger.info(f"   📸 Google: {len(results)} cu preț")
         
@@ -400,5 +409,5 @@ def get_debug(filename):
     return "Not found", 404
 
 if __name__ == '__main__':
-    logger.info("🚀 PriceMonitor v9.7 (Google→Bing→Site) pe :8080")
+    logger.info("🚀 PriceMonitor v9.8 (Google SERP - min price) pe :8080")
     app.run(host='0.0.0.0', port=8080)
