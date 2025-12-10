@@ -112,26 +112,15 @@ def extract_foglia_price(text):
 # ============ EXTRACȚIE SPECIFICĂ NEAKAISA ============
 def extract_neakaisa_price(text):
     """
-    Neakaisa are format: PREȚ_VÂNZARE Lei. PRP Lei
-    Primul preț e cel de vânzare, al doilea e PRP
-    Exemplu: "825,00 Lei. 1.549,00 Lei"
+    Neakaisa are format: PREȚ_VÂNZARE Lei. Transport gratuit la comenzile peste XXX Lei
+    Primul preț e cel de vânzare, "peste XXX Lei" e prag transport (NU preț!)
+    Exemplu: "825,00 Lei. Transport gratuit la comenzile peste 599 Lei"
     """
-    # Pattern: primul preț Lei urmat de . și alt preț Lei (PRP)
-    match = re.search(r'([\d.,]+)\s*Lei\.\s*[\d.,]+\s*Lei', text, re.IGNORECASE)
-    if match:
-        price = clean_price(match.group(1))
-        if price > 0:
-            return price
+    # Eliminăm "peste XXX Lei" din text pentru a nu-l confunda cu prețul
+    text_clean = re.sub(r'peste\s*[\d.,]+\s*Lei', '', text, flags=re.IGNORECASE)
     
-    # Pattern alternativ: preț Lei cu "prp" în apropiere
-    match = re.search(r'([\d.,]+)\s*Lei[^\.]*prp', text, re.IGNORECASE)
-    if match:
-        price = clean_price(match.group(1))
-        if price > 0:
-            return price
-    
-    # Pattern: preț urmat de "(din X recenzii)" - specific Neakaisa
-    match = re.search(r'([\d.,]+)\s*Lei[^\.]*\(din\s*\d+\s*recenzii\)', text, re.IGNORECASE)
+    # Pattern: primul preț Lei din text curățat
+    match = re.search(r'([\d.,]+)\s*Lei', text_clean, re.IGNORECASE)
     if match:
         price = clean_price(match.group(1))
         if price > 0:
@@ -728,5 +717,5 @@ def get_debug(filename):
     return "Not found", 404
 
 if __name__ == '__main__':
-    logger.info("🚀 PriceMonitor v10.5 (Neakaisa Extract) pe :8080")
+    logger.info("🚀 PriceMonitor v10.6 (Neakaisa Fix) pe :8080")
     app.run(host='0.0.0.0', port=8080)
