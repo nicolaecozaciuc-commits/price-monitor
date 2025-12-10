@@ -86,7 +86,30 @@ def extract_prices_from_text(text):
     return prices[:10]
 
 
-# ============ GOOGLE STEALTH - PASUL 1 ============
+# ============ EXTRACȚIE SPECIFICĂ FOGLIA ============
+def extract_foglia_price(text):
+    """
+    Foglia are format specific: PREȚ RON · In stock
+    Prețul principal e cel mare, urmat de "In stock"
+    """
+    # Pattern: preț RON urmat de "· In stock" sau "● In stock"
+    match = re.search(r'([\d.,]+)\s*RON\s*[·●]\s*(?:●\s*)?In stock', text, re.IGNORECASE)
+    if match:
+        price = clean_price(match.group(1))
+        if price > 0:
+            return price
+    
+    # Fallback: preț RON urmat de "In stock" (fără ·)
+    match = re.search(r'([\d.,]+)\s*RON[^·]*In stock', text, re.IGNORECASE)
+    if match:
+        price = clean_price(match.group(1))
+        if price > 0:
+            return price
+    
+    return None
+
+
+
 def google_stealth_search(page, query, sku_for_match=None):
     """
     Google caută în tăcere, face 'poză' la prima pagină.
@@ -152,6 +175,19 @@ def google_stealth_search(page, query, sku_for_match=None):
                 # Caută TOATE prețurile în context
                 context = ' '.join(lines[max(0,i-2):min(len(lines),i+3)])
                 
+                # SPECIAL FOGLIA: folosește metoda specifică
+                if current_domain == 'foglia.ro':
+                    foglia_price = extract_foglia_price(context)
+                    if foglia_price and foglia_price > 0:
+                        if not any(r['domain'] == current_domain for r in results):
+                            results.append({
+                                'domain': current_domain,
+                                'price': foglia_price,
+                                'source': 'Google SERP (Foglia)'
+                            })
+                            logger.info(f"      🟣 {current_domain}: {foglia_price} Lei (Foglia)")
+                        continue
+                
                 # Găsește prețuri CU contextul lor (pentru a detecta transport)
                 price_patterns = re.finditer(r'([\d.,]+)\s*(?:RON|Lei|lei)', context, re.IGNORECASE)
                 
@@ -216,6 +252,20 @@ def google_stealth_search(page, query, sku_for_match=None):
                     block_start = domain_line
                     block_end = min(len(lines), domain_line + 7)
                     block_text = ' '.join(lines[block_start:block_end])
+                    
+                    # SPECIAL FOGLIA: folosește metoda specifică
+                    if current_domain == 'foglia.ro':
+                        foglia_price = extract_foglia_price(block_text)
+                        if foglia_price and foglia_price > 0:
+                            results.append({
+                                'domain': current_domain,
+                                'price': foglia_price,
+                                'source': 'Google SERP (Foglia)'
+                            })
+                            logger.info(f"      🟣 {current_domain}: {foglia_price} Lei (Foglia)")
+                            current_domain = None
+                            domain_line = -1
+                            continue
                     
                     # Găsește prețuri CU contextul lor
                     price_patterns = re.finditer(r'([\d.,]+)\s*(?:RON|Lei|lei)', block_text, re.IGNORECASE)
@@ -505,5 +555,5 @@ def get_debug(filename):
     return "Not found", 404
 
 if __name__ == '__main__':
-    logger.info("🚀 PriceMonitor v10.2 (Bloc Search) pe :8080")
+    logger.info("🚀 PriceMonitor v10.3 (Foglia Extract) pe :8080")
     app.run(host='0.0.0.0', port=8080)
