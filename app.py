@@ -56,23 +56,12 @@ def normalize(text):
     return re.sub(r'[^a-z0-9]', '', text.lower())
 
 def accept_cookies(page):
-    """Încearcă să accepte cookie-uri - mai agresiv"""
-    
-    # Selectori specifici pentru site-uri românești
+    """Încearcă să accepte cookie-uri"""
     selectors = [
-        # Absulo specific
         'button:has-text("Permite toate")',
-        'button:has-text("Permite")',
-        # Generic
         'button:has-text("Accept")',
         'button:has-text("Acceptă")',
-        'button:has-text("Accept all")',
-        'button:has-text("Accept toate")',
         '#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll',
-        '.cc-accept',
-        '[data-action="accept"]',
-        'a:has-text("Permite toate")',
-        'a:has-text("Accept")',
     ]
     
     for selector in selectors:
@@ -80,46 +69,19 @@ def accept_cookies(page):
             btn = page.locator(selector).first
             if btn.is_visible(timeout=1000):
                 btn.click(force=True)
-                logger.info(f"         🍪 Cookie click: {selector[:30]}")
-                time.sleep(1.5)
+                logger.info(f"         🍪 Cookie: {selector[:30]}")
                 return True
         except:
             continue
-    
-    # Fallback: click pe orice buton vizibil cu text relevant
-    try:
-        buttons = page.locator('button').all()
-        for btn in buttons:
-            try:
-                text = btn.inner_text().lower()
-                if 'permite' in text or 'accept' in text:
-                    btn.click(force=True)
-                    logger.info(f"         🍪 Cookie fallback: {text[:20]}")
-                    time.sleep(1.5)
-                    return True
-            except:
-                continue
-    except:
-        pass
-    
     return False
 
 def extract_prices_from_text(text):
-    """Extrage toate prețurile dintr-un text"""
     prices = []
-    patterns = [
-        r'([\d.,]+)\s*Lei',
-        r'([\d.,]+)\s*lei',
-        r'([\d.,]+)\s*RON',
-    ]
-    
-    for pattern in patterns:
-        matches = re.findall(pattern, text, re.IGNORECASE)
-        for m in matches:
-            p = clean_price(m)
-            if p > 0 and p not in prices:
-                prices.append(p)
-    
+    matches = re.findall(r'([\d.,]+)\s*Lei', text, re.IGNORECASE)
+    for m in matches:
+        p = clean_price(m)
+        if p > 0 and p not in prices:
+            prices.append(p)
     return prices[:10]
 
 def get_domains_from_bing(page):
@@ -147,18 +109,22 @@ def find_price_on_search_page(page, domain, sku, save_debug=False):
     search_url = SEARCH_URLS.get(domain, f'https://www.{domain}/search?q={{}}')
     sku_norm = normalize(sku)
     sku_lower = sku.lower()
+    url = search_url.format(quote_plus(sku))
     
     try:
-        url = search_url.format(quote_plus(sku))
+        # Prima încărcare
         page.goto(url, timeout=15000, wait_until='domcontentloaded')
         time.sleep(2)
         
-        # ACCEPT COOKIES - încearcă de 2 ori
-        accept_cookies(page)
-        time.sleep(1)
-        accept_cookies(page)  # A doua încercare
+        # Accept cookies
+        cookie_accepted = accept_cookies(page)
         
-        time.sleep(2)
+        if cookie_accepted:
+            # RELOAD pagina după accept cookies!
+            time.sleep(1)
+            page.reload(wait_until='domcontentloaded')
+            time.sleep(3)
+            logger.info(f"         🔄 Reload după cookies")
         
         # Scroll
         page.evaluate("window.scrollTo(0, 500)")
@@ -167,52 +133,27 @@ def find_price_on_search_page(page, domain, sku, save_debug=False):
         # Salvează debug
         if save_debug:
             page.screenshot(path=f"{DEBUG_DIR}/{domain}_{sku}.png")
-            with open(f"{DEBUG_DIR}/{domain}_{sku}.txt", 'w', encoding='utf-8') as f:
-                f.write(page.locator('body').inner_text())
         
         body_text = page.locator('body').inner_text()
         body_lower = body_text.lower()
-        body_norm = normalize(body_text)
         
-        # Check erori - EXTINS
-        error_phrases = [
-            '0 produse', 
-            'niciun rezultat',
-            'nu s-au gasit',
-            'nu am gasit',
-            'nu a fost gasit',
-            'nothing found',
-            'no results',
-            'nu exista produse',
-        ]
+        # Check erori
+        error_phrases = ['0 produse', 'nu s-au gasit', 'nu am gasit', 'niciun rezultat']
         for phrase in error_phrases:
-            if phrase in body_lower:
-                # Verifică să nu fie "(4 produse)"
-                if 'produse)' not in body_lower or '0 produse' in body_lower:
-                    logger.info(f"         ⚠️ {phrase}")
-                    return None
+            if phrase in body_lower and 'produse)' not in body_lower:
+                logger.info(f"         ⚠️ {phrase}")
+                return None
         
-        # Check SKU - dar NU în zona de search/title
-        # Exclude primele linii care conțin searchul
-        lines = body_text.split('\n')
-        content_start = 0
-        for i, line in enumerate(lines[:10]):
-            if 'rezultate' in line.lower() or 'search' in line.lower():
-                content_start = i + 1
-                break
-        
-        content_text = '\n'.join(lines[content_start:])
-        content_norm = normalize(content_text)
-        
-        has_sku = sku_norm in content_norm or sku_lower in content_text.lower()
-        logger.info(f"         SKU în conținut: {has_sku}")
+        # Check SKU
+        has_sku = sku_lower in body_lower or sku_norm in normalize(body_text)
+        logger.info(f"         SKU: {has_sku}")
         
         if not has_sku:
             return None
         
-        # Extrage prețuri din conținut (nu din header)
-        prices = extract_prices_from_text(content_text)
-        logger.info(f"         💰 Prețuri: {prices[:5]}")
+        # Extrage prețuri
+        prices = extract_prices_from_text(body_text)
+        logger.info(f"         💰 {prices[:5]}")
         
         if prices:
             return {'price': prices[0], 'url': url}
@@ -220,7 +161,7 @@ def find_price_on_search_page(page, domain, sku, save_debug=False):
         return None
         
     except Exception as e:
-        logger.info(f"         ❌ Error: {str(e)[:30]}")
+        logger.info(f"         ❌ {str(e)[:30]}")
         return None
 
 def scan_product(sku, name, your_price=0):
@@ -253,25 +194,22 @@ def scan_product(sku, name, your_price=0):
             
             try:
                 page.click('#bnp_btn_accept', timeout=3000)
-                time.sleep(1)
             except:
                 pass
             
             domains = get_domains_from_bing(page)
             
-            # Adaugă site-uri importante
-            for important in ['germanquality.ro', 'sensodays.ro', 'absulo.ro']:
+            for important in ['absulo.ro', 'germanquality.ro', 'sensodays.ro']:
                 if important not in domains:
                     domains.append(important)
             
-            logger.info(f"   🌐 Site-uri: {domains[:8]}")
+            logger.info(f"   🌐 {domains[:8]}")
             
-            # ETAPA 2: Verifică pe fiecare site
+            # ETAPA 2: Verifică
             for i, domain in enumerate(domains[:8]):
                 logger.info(f"      🔗 {domain}...")
                 
-                save_debug = (i < 3)
-                result = find_price_on_search_page(page, domain, sku, save_debug)
+                result = find_price_on_search_page(page, domain, sku, save_debug=(i<3))
                 
                 if result:
                     found.append({
@@ -291,7 +229,7 @@ def scan_product(sku, name, your_price=0):
             logger.info(f"   📊 Total: {len(found)}")
             
         except Exception as e:
-            logger.info(f"   ❌ Error: {str(e)[:50]}")
+            logger.info(f"   ❌ {str(e)[:50]}")
         finally:
             page.close()
         
@@ -322,5 +260,5 @@ def get_debug(filename):
     return "Not found", 404
 
 if __name__ == '__main__':
-    logger.info("🚀 PriceMonitor v9.4 (Better Cookie + Error Detection) pe :8080")
+    logger.info("🚀 PriceMonitor v9.5 (Reload After Cookies) pe :8080")
     app.run(host='0.0.0.0', port=8080)
