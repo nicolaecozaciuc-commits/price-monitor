@@ -116,92 +116,71 @@ def get_domains_from_bing(page):
         pass
     return domains[:10]
 
-def find_price_on_search_page(page, domain, sku):
-    """Caută preț direct pe pagina de rezultate căutare"""
+def find_price_on_search_page(page, domain, sku, save_debug=False):
+    """Caută preț pe pagina de rezultate"""
     
     search_url = SEARCH_URLS.get(domain, f'https://www.{domain}/search?q={{}}')
     sku_norm = normalize(sku)
+    sku_lower = sku.lower()
     
     try:
         url = search_url.format(quote_plus(sku))
         page.goto(url, timeout=15000, wait_until='domcontentloaded')
-        time.sleep(2.5)
+        time.sleep(3)  # Mai mult timp să se încarce
+        
+        # Salvează debug
+        if save_debug:
+            page.screenshot(path=f"{DEBUG_DIR}/{domain}_{sku}.png")
+            with open(f"{DEBUG_DIR}/{domain}_{sku}.txt", 'w', encoding='utf-8') as f:
+                f.write(page.locator('body').inner_text())
         
         body_text = page.locator('body').inner_text()
         body_lower = body_text.lower()
+        body_norm = normalize(body_text)
+        
+        # Debug log
+        has_sku = sku_norm in body_norm or sku_lower in body_lower
+        logger.info(f"         SKU în pagină: {has_sku}")
         
         # Verifică erori
-        error_phrases = ['nu am gasit', 'nu a fost gasit', 'nothing found', '0 rezultate', '0 produse', 'no results', 'niciun rezultat']
+        error_phrases = ['nu am gasit', 'nu a fost gasit', 'nothing found', '0 rezultate', '0 produse', 'niciun rezultat']
         for phrase in error_phrases:
             if phrase in body_lower:
+                logger.info(f"         ⚠️ Eroare: '{phrase}'")
                 return None
         
-        # Verifică că SKU apare în pagină
-        if sku_norm not in normalize(body_text) and sku_norm[1:] not in normalize(body_text):
+        if not has_sku:
             return None
         
-        # METODA 1: Extrage din JSON-LD (pagină catalog)
-        try:
-            for script in page.locator('script[type="application/ld+json"]').all()[:5]:
-                try:
-                    data = json.loads(script.inner_text())
-                    if isinstance(data, dict) and data.get('@type') == 'ItemList':
-                        items = data.get('itemListElement', [])
-                        for item in items:
-                            product = item.get('item', {})
-                            if product.get('@type') == 'Product':
-                                prod_name = product.get('name', '').lower()
-                                if sku.lower() in prod_name or sku_norm in normalize(prod_name):
-                                    offers = product.get('offers', {})
-                                    if isinstance(offers, list):
-                                        offers = offers[0] if offers else {}
-                                    price = clean_price(offers.get('price') or offers.get('lowPrice'))
-                                    if price > 0:
-                                        return {'price': price, 'url': url}
-                except:
-                    continue
-        except:
-            pass
+        # Caută preț aproape de SKU
+        # Metoda: găsește toate aparițiile SKU și caută preț în jur
+        for match in re.finditer(re.escape(sku_lower), body_lower):
+            pos = match.start()
+            # Extrage context ±200 caractere
+            start = max(0, pos - 200)
+            end = min(len(body_text), pos + 200)
+            context = body_text[start:end]
+            
+            # Caută preț în context
+            price_match = re.search(r'([\d.,]+)\s*Lei', context)
+            if price_match:
+                price = clean_price(price_match.group(1))
+                if price > 0:
+                    logger.info(f"         💰 Preț găsit: {price}")
+                    return {'price': price, 'url': url}
         
-        # METODA 2: Caută blocuri produs cu SKU și preț
-        # Împarte textul în secțiuni și caută SKU + preț în apropiere
-        lines = body_text.split('\n')
-        for i, line in enumerate(lines):
-            line_norm = normalize(line)
-            if sku_norm in line_norm or sku_norm[1:] in line_norm:
-                # Caută preț în liniile din jur (±5 linii)
-                context = '\n'.join(lines[max(0,i-5):i+10])
-                price_match = re.search(r'([\d.,]+)\s*Lei', context)
-                if price_match:
-                    price = clean_price(price_match.group(1))
-                    if price > 0:
-                        return {'price': price, 'url': url}
-        
-        # METODA 3: Click pe primul produs și extrage preț
-        try:
-            # Caută link care conține SKU
-            for link in page.locator('a').all()[:30]:
-                try:
-                    text = link.inner_text().lower()
-                    href = link.get_attribute('href') or ''
-                    
-                    if sku.lower() in text or sku_norm in normalize(text):
-                        if href.startswith('/'):
-                            href = f"https://www.{domain}{href}"
-                        if domain in href and 'cart' not in href.lower():
-                            page.goto(href, timeout=10000, wait_until='domcontentloaded')
-                            time.sleep(1.5)
-                            price = extract_price_from_page(page)
-                            if price > 0:
-                                return {'price': price, 'url': href}
-                except:
-                    continue
-        except:
-            pass
+        # Metodă alternativă: primul preț de pe pagină dacă SKU există
+        price_matches = re.findall(r'([\d.,]+)\s*Lei', body_text)
+        for pm in price_matches[:5]:
+            price = clean_price(pm)
+            if price > 0:
+                logger.info(f"         💰 Primul preț: {price}")
+                return {'price': price, 'url': url}
         
         return None
         
     except Exception as e:
+        logger.info(f"         ❌ Error: {str(e)[:30]}")
         return None
 
 def scan_product(sku, name, your_price=0):
@@ -249,7 +228,10 @@ def scan_product(sku, name, your_price=0):
             for domain in domains[:8]:
                 logger.info(f"      🔗 {domain}...")
                 
-                result = find_price_on_search_page(page, domain, sku)
+                # Salvează debug doar pentru primele 2 site-uri
+                save_debug = (len(found) == 0 and domains.index(domain) < 2)
+                
+                result = find_price_on_search_page(page, domain, sku, save_debug)
                 
                 if result:
                     found.append({
@@ -300,5 +282,5 @@ def get_debug(filename):
     return "Not found", 404
 
 if __name__ == '__main__':
-    logger.info("🚀 PriceMonitor v8.9 (Search Page Extract) pe :8080")
+    logger.info("🚀 PriceMonitor v9.0 (Debug Mode) pe :8080")
     app.run(host='0.0.0.0', port=8080)
