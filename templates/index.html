@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="ro">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Price Monitor</title>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { background-color: #0f0f0f; color: #e0e0e0; font-family: 'Segoe UI', sans-serif; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState } = React;
+
+        const parseCSV = (text) => {
+            const rows = []; let currentRow = []; let currentCell = ''; let inQuote = false;
+            const cleanText = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+            for (let i = 0; i < cleanText.length; i++) {
+                const char = cleanText[i];
+                if (char === '"') { if (inQuote && cleanText[i+1] === '"') { currentCell += '"'; i++; } else { inQuote = !inQuote; } }
+                else if (char === ',' && !inQuote) { currentRow.push(currentCell); currentCell = ''; }
+                else if (char === '\n' && !inQuote) { currentRow.push(currentCell); rows.push(currentRow); currentRow = []; currentCell = ''; }
+                else { currentCell += char; }
+            }
+            if (currentCell || currentRow.length > 0) { currentRow.push(currentCell); rows.push(currentRow); }
+            return rows;
+        };
+
+        const parsePrice = (p) => {
+            if (!p) return 0;
+            let c = String(p).trim();
+            if (c.includes(',') && c.indexOf(',') > c.lastIndexOf('.')) c = c.replace(/\./g, '').replace(',', '.');
+            else if (c.includes(',')) c = c.replace(',', '.');
+            return parseFloat(c.replace(/[^0-9.]/g, '')) || 0;
+        };
+
+        const normalize = (h) => h ? h.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]/g, "") : "";
+
+        const Dashboard = () => {
+            const [products, setProducts] = useState([]);
+            const [checkingIds, setCheckingIds] = useState(new Set());
+
+            const handleCheckPrice = async (id) => {
+                const p = products.find(x => x.id === id);
+                if (!p) return;
+                setCheckingIds(prev => new Set(prev).add(id));
+                try {
+                    const res = await fetch('/api/check', {
+                        method: 'POST', headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({ sku: p.sku, name: p.name })
+                    });
+                    const data = await res.json();
+                    if (data.status === 'success') {
+                        setProducts(prev => prev.map(prod => prod.id === id ? { ...prod, competitors: data.competitors } : prod));
+                    }
+                } catch (e) { console.error(e); }
+                finally { setCheckingIds(prev => { const n = new Set(prev); n.delete(id); return n; }); }
+            };
+
+            const handleUpload = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = (evt) => {
+                    const rows = parseCSV(evt.target.result);
+                    if (rows.length < 2) return alert("Fisier gol");
+                    const headers = rows[0];
+                    const normHeaders = headers.map(h => normalize(h));
+                    let idxSku = normHeaders.findIndex(h => h.includes('sku'));
+                    let idxName = normHeaders.findIndex(h => h.includes('nume') || h.includes('titlu'));
+                    let idxPrice = normHeaders.findIndex(h => h.includes('pret') && !h.includes('concurent'));
+                    if (idxSku === -1 || idxPrice === -1) return alert("Nu am gasit coloanele SKU/Pret");
+                    setProducts(rows.slice(1).map((row, i) => ({
+                        id: Date.now() + i, name: row[idxName] || "", sku: row[idxSku], price: parsePrice(row[idxPrice]), competitors: []
+                    })).filter(p => p.sku));
+                };
+                reader.readAsText(file);
+            };
+
+            return (
+                <div className="max-w-6xl mx-auto p-6">
+                    <div className="flex justify-between items-center mb-6 bg-[#1a1a1a] p-4 rounded-xl">
+                        <h1 className="text-xl font-bold">Price Monitor</h1>
+                        <label className="bg-blue-600 px-4 py-2 rounded cursor-pointer hover:bg-blue-700">
+                            Incarca CSV <input type="file" accept=".csv" onChange={handleUpload} className="hidden"/>
+                        </label>
+                    </div>
+                    <table className="w-full text-left text-sm bg-[#1a1a1a] rounded-xl overflow-hidden">
+                        <thead className="bg-[#111] text-gray-400 uppercase text-xs">
+                            <tr><th className="p-4">Produs / SKU</th><th className="p-4">Pretul Tau</th><th className="p-4">Concurenta</th><th className="p-4">Actiuni</th></tr>
+                        </thead>
+                        <tbody>
+                            {products.length === 0 ? (
+                                <tr><td colSpan="4" className="p-8 text-center text-gray-500">Niciun produs. Incarca un CSV.</td></tr>
+                            ) : products.map(p => (
+                                <tr key={p.id} className="border-t border-[#333]">
+                                    <td className="p-4"><div className="font-bold">{p.name}</div><div className="text-xs text-gray-500">{p.sku}</div></td>
+                                    <td className="p-4 text-green-400 font-bold">{p.price} Lei</td>
+                                    <td className="p-4">
+                                        {p.competitors.length > 0 ? p.competitors.map((c,i) => (
+                                            <div key={i} className="flex justify-between text-xs mb-1">
+                                                <a href={c.url} target="_blank" className="text-blue-400 hover:underline">{c.name}</a>
+                                                <span className={c.price < p.price ? 'text-red-400' : 'text-green-400'}>{c.price} Lei</span>
+                                            </div>
+                                        )) : <span className="text-gray-500">-</span>}
+                                    </td>
+                                    <td className="p-4">
+                                        <button onClick={() => handleCheckPrice(p.id)} className="text-blue-400 hover:underline">
+                                            {checkingIds.has(p.id) ? '...' : 'Verifica'}
+                                        </button>
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            );
+        };
+        ReactDOM.createRoot(document.getElementById('root')).render(<Dashboard />);
+    </script>
+</body>
+</html>
