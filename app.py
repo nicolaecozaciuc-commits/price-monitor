@@ -92,21 +92,127 @@ def extract_foglia_price(text):
     Foglia are format specific: PREȚ RON · In stock
     Prețul principal e cel mare, urmat de "In stock"
     """
-    # Pattern: preț RON urmat de "· In stock" sau "● In stock"
-    match = re.search(r'([\d.,]+)\s*RON\s*[·●]\s*(?:●\s*)?In stock', text, re.IGNORECASE)
+    # Pattern: preț RON urmat de "· În stoc" sau "· In stock" (română sau engleză)
+    match = re.search(r'([\d.,]+)\s*RON\s*[·●]\s*(?:●\s*)?[ÎI]n stoc', text, re.IGNORECASE)
     if match:
         price = clean_price(match.group(1))
         if price > 0:
             return price
     
-    # Fallback: preț RON urmat de "In stock" (fără ·)
-    match = re.search(r'([\d.,]+)\s*RON[^·]*In stock', text, re.IGNORECASE)
+    # Fallback: preț RON urmat de "În stoc" (fără ·)
+    match = re.search(r'([\d.,]+)\s*RON[^·]*[ÎI]n stoc', text, re.IGNORECASE)
     if match:
         price = clean_price(match.group(1))
         if price > 0:
             return price
     
     return None
+
+
+# ============ METODA 3: EXTRACȚIE HTML STRUCTURAT ============
+def extract_from_google_html(page, sku):
+    """
+    Extrage prețuri din structura HTML a paginii Google.
+    Caută în sponsored products și rezultate organice.
+    """
+    results = []
+    sku_lower = sku.lower()
+    
+    try:
+        html_content = page.content()
+        
+        # Salvează HTML pentru debug
+        with open(f"{DEBUG_DIR}/google_{sku}_html.html", 'w', encoding='utf-8') as f:
+            f.write(html_content)
+        
+        # Pattern pentru prețuri cu domeniu în apropiere
+        # Format: "13.200,00 RON" sau "13,200.00 RON" urmat/precedat de ".ro"
+        
+        # Caută toate combinațiile de preț + domain din HTML
+        # Pattern: domain.ro ... preț RON sau preț RON ... domain.ro
+        
+        # Metodă: găsește toate link-urile .ro și prețurile din vecinătate
+        
+        # Extragem blocuri care conțin și .ro și RON/Lei
+        blocks = re.findall(r'[^<>]{0,500}?([a-z0-9-]+\.ro)[^<>]{0,500}', html_content.lower())
+        
+        for block in blocks:
+            domain = block
+            if not domain or len(domain) < 5 or any(b in domain for b in BLOCKED):
+                continue
+            
+            # Verifică duplicat
+            if any(r['domain'] == domain for r in results):
+                continue
+        
+        # Metodă alternativă: caută pattern "PREȚ RON" cu context
+        price_patterns = re.finditer(
+            r'([a-z0-9-]+\.ro)[^<>]{0,200}?([\d.,]+)\s*(?:RON|Lei)',
+            html_content,
+            re.IGNORECASE
+        )
+        
+        for match in price_patterns:
+            domain = match.group(1).lower()
+            price = clean_price(match.group(2))
+            
+            if not domain or len(domain) < 5 or any(b in domain for b in BLOCKED):
+                continue
+            if price <= 0:
+                continue
+            if any(r['domain'] == domain for r in results):
+                continue
+            
+            # Verifică context pentru transport
+            context = match.group(0).lower()
+            transport_words = ['delivery', 'transport', 'livrare', 'shipping', 'expediere', ' sh']
+            is_transport = any(tw in context for tw in transport_words)
+            
+            if not is_transport:
+                results.append({
+                    'domain': domain,
+                    'price': price,
+                    'source': 'Google HTML'
+                })
+                logger.info(f"      🟠 {domain}: {price} Lei (HTML)")
+        
+        # Pattern invers: preț apoi domain
+        price_patterns_rev = re.finditer(
+            r'([\d.,]+)\s*(?:RON|Lei)[^<>]{0,200}?([a-z0-9-]+\.ro)',
+            html_content,
+            re.IGNORECASE
+        )
+        
+        for match in price_patterns_rev:
+            price = clean_price(match.group(1))
+            domain = match.group(2).lower()
+            
+            if not domain or len(domain) < 5 or any(b in domain for b in BLOCKED):
+                continue
+            if price <= 0:
+                continue
+            if any(r['domain'] == domain for r in results):
+                continue
+            
+            context = match.group(0).lower()
+            transport_words = ['delivery', 'transport', 'livrare', 'shipping', 'expediere', ' sh']
+            is_transport = any(tw in context for tw in transport_words)
+            
+            if not is_transport:
+                results.append({
+                    'domain': domain,
+                    'price': price,
+                    'source': 'Google HTML'
+                })
+                logger.info(f"      🟠 {domain}: {price} Lei (HTML)")
+        
+        if results:
+            logger.info(f"   🟠 Metoda HTML: {len(results)} găsite")
+    
+    except Exception as e:
+        logger.info(f"   ⚠️ HTML extract: {str(e)[:40]}")
+    
+    return results
 
 
 
@@ -303,6 +409,15 @@ def google_stealth_search(page, query, sku_for_match=None):
                     domain_line = -1
         
         logger.info(f"   📸 Total după bloc: {len(results)}")
+        
+        # ========== METODA 3: HTML STRUCTURAT ==========
+        html_results = extract_from_google_html(page, query)
+        for r in html_results:
+            if not any(existing['domain'] == r['domain'] for existing in results):
+                results.append(r)
+        
+        if html_results:
+            logger.info(f"   📸 Total după HTML: {len(results)}")
         
     except Exception as e:
         logger.info(f"   ⚠️ Google: {str(e)[:40]}")
@@ -555,5 +670,5 @@ def get_debug(filename):
     return "Not found", 404
 
 if __name__ == '__main__':
-    logger.info("🚀 PriceMonitor v10.3 (Foglia Extract) pe :8080")
+    logger.info("🚀 PriceMonitor v10.4 (HTML Extract) pe :8080")
     app.run(host='0.0.0.0', port=8080)
