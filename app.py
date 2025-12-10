@@ -87,14 +87,17 @@ def extract_prices_from_text(text):
 
 
 # ============ GOOGLE STEALTH - PASUL 1 ============
-def google_stealth_search(page, sku):
+def google_stealth_search(page, query, sku_for_match=None):
     """
     Google caută în tăcere, face 'poză' la prima pagină.
     Returnează lista de {domain, price} găsite în snippets.
+    query = ce căutăm (SKU sau denumire)
+    sku_for_match = SKU-ul pentru salvarea fișierelor debug (opțional)
     """
     results = []
-    query = f"{sku} pret RON"
-    url = f"https://www.google.com/search?q={quote_plus(query)}&hl=ro&gl=ro"
+    search_query = f"{query} pret RON"
+    url = f"https://www.google.com/search?q={quote_plus(search_query)}&hl=ro&gl=ro"
+    file_suffix = sku_for_match or query.replace(' ', '_')[:20]
     
     try:
         page.goto(url, timeout=15000, wait_until='domcontentloaded')
@@ -112,16 +115,16 @@ def google_stealth_search(page, sku):
         time.sleep(1)
         
         # Salvează "poza"
-        page.screenshot(path=f"{DEBUG_DIR}/google_{sku}.png")
+        page.screenshot(path=f"{DEBUG_DIR}/google_{file_suffix}.png")
         
         # Extragem textul întregii pagini
         body_text = page.locator('body').inner_text()
         
         # Salvează și textul
-        with open(f"{DEBUG_DIR}/google_{sku}.txt", 'w', encoding='utf-8') as f:
+        with open(f"{DEBUG_DIR}/google_{file_suffix}.txt", 'w', encoding='utf-8') as f:
             f.write(body_text)
         
-        # Căutăm blocuri cu SKU și preț
+        # Căutăm blocuri cu preț
         lines = body_text.split('\n')
         current_domain = None
         
@@ -135,8 +138,17 @@ def google_stealth_search(page, sku):
                 if len(d) > 4 and not any(b in d for b in BLOCKED):
                     current_domain = d
             
-            # Dacă linia conține SKU
-            if sku.lower() in line_lower and current_domain:
+            # Dacă linia conține query (sau parte din el) și avem domain
+            query_lower = query.lower()
+            # Căutăm fie query-ul complet, fie SKU-ul dacă e prezent
+            has_match = query_lower in line_lower
+            if not has_match and len(query.split()) > 1:
+                # Pentru query-uri lungi, verificăm dacă măcar 2 cuvinte se potrivesc
+                words = query_lower.split()
+                matches = sum(1 for w in words if w in line_lower and len(w) > 3)
+                has_match = matches >= 2
+            
+            if has_match and current_domain:
                 # Caută TOATE prețurile în context
                 context = ' '.join(lines[max(0,i-2):min(len(lines),i+3)])
                 price_matches = re.findall(r'([\d.,]+)\s*(?:RON|Lei|lei)', context, re.IGNORECASE)
@@ -302,9 +314,9 @@ def scan_product(sku, name, your_price=0):
         page = context.new_page()
         
         try:
-            # ========== PASUL 1: GOOGLE (în tăcere) ==========
-            logger.info(f"   🔍 Google caută...")
-            google_results = google_stealth_search(page, sku)
+            # ========== PASUL 1: GOOGLE SEARCH BY SKU ==========
+            logger.info(f"   🔍 Google #1: SKU...")
+            google_results = google_stealth_search(page, sku, sku)
             
             # Adaugă rezultatele cu preț direct
             for r in google_results:
@@ -313,8 +325,30 @@ def scan_product(sku, name, your_price=0):
                         'name': r['domain'],
                         'price': r['price'],
                         'url': f"https://www.{r['domain']}",
-                        'method': 'Google SERP'
+                        'method': 'Google SKU'
                     })
+            
+            # ========== PASUL 2: GOOGLE SEARCH BY NAME (dacă avem < 5) ==========
+            if len(found) < 5 and name and len(name) > 10:
+                logger.info(f"   🔍 Google #2: Denumire...")
+                # Construiește query din denumire (primele 5-6 cuvinte + SKU)
+                name_words = name.split()[:6]
+                name_query = ' '.join(name_words)
+                if sku.upper() not in name_query.upper():
+                    name_query += f" {sku}"
+                
+                google_results_name = google_stealth_search(page, name_query, f"{sku}_name")
+                
+                # Adaugă doar site-uri noi
+                for r in google_results_name:
+                    if r['price'] > 0 and not any(f['name'] == r['domain'] for f in found):
+                        found.append({
+                            'name': r['domain'],
+                            'price': r['price'],
+                            'url': f"https://www.{r['domain']}",
+                            'method': 'Google Name'
+                        })
+                        logger.info(f"      🟡 {r['domain']}: {r['price']} Lei (din denumire)")
             
             # ========== PASUL 2: BING (fallback) ==========
             if len(found) < 3:
@@ -409,5 +443,5 @@ def get_debug(filename):
     return "Not found", 404
 
 if __name__ == '__main__':
-    logger.info("🚀 PriceMonitor v9.8 (Google SERP - min price) pe :8080")
+    logger.info("🚀 PriceMonitor v9.9 (Google SKU + Denumire) pe :8080")
     app.run(host='0.0.0.0', port=8080)
