@@ -2,6 +2,7 @@ import re
 import logging
 import time
 import random
+import unicodedata
 from flask import Flask, request, jsonify, render_template
 from flask_cors import CORS
 from playwright.sync_api import sync_playwright
@@ -9,13 +10,11 @@ from playwright.sync_api import sync_playwright
 app = Flask(__name__, template_folder='templates')
 CORS(app)
 
-# Configurare Logging
 log = logging.getLogger('werkzeug')
 log.setLevel(logging.ERROR)
-logging.basicConfig(level=logging.INFO, format='%(asctime)s | %(levelname)s | %(message)s', datefmt='%H:%M:%S')
+logging.basicConfig(level=logging.INFO, format='%(asctime)s | %(message)s', datefmt='%H:%M:%S')
 logger = logging.getLogger('PriceMonitor')
 
-# --- CONFIGURARE SITE-URI COMPETITORI ---
 COMPETITORS = {
     'Dedeman': {'url': 'https://www.dedeman.ro/ro/cautare?q={}', 'card': '.product-item', 'price': '.product-price', 'name': '.product-title', 'link': 'a.product-title'},
     'eMAG': {'url': 'https://www.emag.ro/search/{}', 'card': '.card-item', 'price': '.product-new-price', 'name': '.card-v2-title', 'link': 'a.card-v2-title'},
@@ -28,95 +27,43 @@ COMPETITORS = {
     'GemiBai': {'url': 'https://store.gemibai.ro/index.php?route=product/search&search={}', 'card': '.product-thumb', 'price': '.price', 'name': '.caption h4 a', 'link': '.caption h4 a'}
 }
 
+def normalize_text(text):
+    """Elimină diacritice și caractere speciale"""
+    if not text: return ""
+    text = unicodedata.normalize('NFD', text).encode('ascii', 'ignore').decode()
+    return text.lower().strip()
+
 def clean_price(text):
     if not text: return 0
+    text_lower = text.lower()
+    # Ignoră prețuri de transport, rate lunare
+    if any(x in text_lower for x in ['luna', 'rata', 'transport', 'livrare', '/luna', 'lei/']): 
+        return 0
     matches = re.findall(r'(\d[\d\.,]*)', text)
     if not matches: return 0
-    price_str = max(matches, key=len).replace('.', '').replace(',', '.')
-    try: return float(price_str)
-    except: return 0
+    # Ia cel mai mare număr (prețul principal)
+    prices = []
+    for m in matches:
+        p = m.replace('.', '').replace(',', '.')
+        try: prices.append(float(p))
+        except: pass
+    # Filtrează prețuri prea mici (sub 10 lei = probabil greșeală)
+    prices = [p for p in prices if p > 10]
+    return max(prices) if prices else 0
 
 def validate_match(sku, target_name, found_name):
-    sku = str(sku).lower().strip()
-    found_name = found_name.lower()
+    sku = normalize_text(str(sku))
+    found_name = normalize_text(found_name)
+    target_name = normalize_text(target_name)
     
-    # 1. Match SKU (Puternic)
-    if len(sku) > 3 and sku in found_name: return True
+    # 1. SKU Match exact (word boundary - evită E3067 să match-uiască E30678)
+    if len(sku) > 3:
+        if re.search(r'\b' + re.escape(sku) + r'\b', found_name):
+            return True
+        # Sau dacă SKU e la început/sfârșit
+        if found_name.startswith(sku) or found_name.endswith(sku):
+            return True
     
-    # 2. Match Nume (Minim 2 cuvinte cheie)
-    target_parts = target_name.lower().split()[:3]
-    matches = sum(1 for part in target_parts if len(part) > 2 and part in found_name)
-    if matches >= 2: return True
-    return False
-
-def scan_direct(sku, name):
-    found_competitors = []
-    search_term = sku if len(str(sku)) > 3 else name
-    logger.info(f"🔎 DIRECT SEARCH: {search_term}")
-
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        context = browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            viewport={'width': 1920, 'height': 1080}
-        )
-
-        for site, cfg in COMPETITORS.items():
-            try:
-                page = context.new_page()
-                url = cfg['url'].format(search_term)
-                
-                try: page.goto(url, timeout=15000, wait_until='domcontentloaded')
-                except: page.close(); continue
-
-                # Anti-bot simplu
-                try: 
-                    if "dedeman" in url: page.click('button:has-text("Accept")', timeout=1000)
-                    if "emag" in url: page.click('.js-accept', timeout=1000)
-                except: pass
-                
-                time.sleep(random.uniform(2, 4)) # Delay uman
-
-                cards = page.locator(cfg['card']).all()
-                best_match = None
-
-                for card in cards[:3]:
-                    try:
-                        raw_name = card.locator(cfg['name']).first.inner_text()
-                        if validate_match(sku, name, raw_name):
-                            raw_price = card.locator(cfg['price']).first.inner_text()
-                            price = clean_price(raw_price)
-                            
-                            try:
-                                href = card.locator(cfg['link']).first.get_attribute('href')
-                                link = href if href.startswith('http') else f"https://www.{site.lower()}.ro{href}" if 'www' not in href else href
-                            except: link = url
-
-                            if price > 0:
-                                if best_match is None or price < best_match['price']:
-                                    best_match = {"name": site, "price": price, "url": link}
-                    except: continue
-                
-                if best_match:
-                    found_competitors.append(best_match)
-                    logger.info(f"   ✅ {site}: {best_match['price']} Lei")
-                page.close()
-            except Exception as e:
-                logger.error(f"   ❌ Eroare {site}: {str(e)[:50]}")
-
-        browser.close()
-
-    found_competitors.sort(key=lambda x: x['price'])
-    return found_competitors[:5]
-
-@app.route('/')
-def index(): return render_template('index.html')
-
-@app.route('/api/check', methods=['POST'])
-def api_check():
-    d = request.json
-    results = scan_direct(d.get('sku',''), d.get('name',''))
-    return jsonify({"status": "success", "competitors": results})
-
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=8080)
+    # 2. Match Nume (ignoră cuvinte comune)
+    stop_words = {'pentru', 'cm', 'alb', 'alba', 'negru', 'cu', 'de', 'si', 'la', 'din', 'x', 'mm'}
+    target_parts = [w for w in target_name.split() if w not in stop_words and len
