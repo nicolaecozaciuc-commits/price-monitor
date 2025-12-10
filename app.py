@@ -57,69 +57,81 @@ def scan_product(sku, name, your_price=0):
             page.goto(url, timeout=20000, wait_until='domcontentloaded')
             time.sleep(2)
             
-            # Accept cookies PRIMUL
+            # Accept cookies
             try:
                 page.click('#bnp_btn_accept', timeout=3000)
                 time.sleep(2)
             except:
                 pass
             
-            # Screenshot DUPĂ cookies
+            # Screenshot
             page.screenshot(path=f"{DEBUG_DIR}/bing_{sku}.png")
             
-            # Extrage TOATE rezultatele .b_algo
-            results = page.locator('.b_algo').all()
-            logger.info(f"   📊 Rezultate Bing: {len(results)}")
+            # Salvează HTML pentru debug
+            html = page.content()
+            with open(f"{DEBUG_DIR}/bing_{sku}.html", 'w') as f:
+                f.write(html)
             
-            for i, result in enumerate(results[:10]):
-                try:
-                    # Extrage link și text
-                    text = result.inner_text()
-                    
-                    # Afișează primele 3
-                    if i < 3:
-                        logger.info(f"   [{i}] {text[:120]}...")
-                    
-                    # Extrage URL
-                    links = result.locator('a').all()
-                    href = ""
-                    for link in links:
-                        h = link.get_attribute('href') or ''
-                        if '.ro' in h and 'bing' not in h.lower():
-                            href = h
-                            break
-                    
-                    if not href:
-                        continue
-                    
-                    # Extrage domain
-                    domain_match = re.search(r'https?://(?:www\.)?([a-z0-9-]+\.ro)', href.lower())
-                    if not domain_match:
-                        continue
-                    domain = domain_match.group(1)
-                    
-                    # Skip blocked
-                    blocked = ['google', 'bing', 'microsoft', 'facebook', 'youtube', 'doarbai', 'termohabitat', 'kaufland']
-                    if any(b in domain for b in blocked):
-                        continue
-                    
-                    # Caută preț în text
-                    price_match = re.search(r'([\d.,]+)\s*(?:RON|Lei|ron|lei)', text)
-                    if price_match:
-                        price = clean_price(price_match.group(1))
-                        if price > 0:
+            # METODA NOUĂ: Extrage din HTML complet
+            # Caută pattern: domain.ro ... preț RON
+            
+            # Găsește toate linkurile .ro cu prețuri în apropiere
+            blocked = ['google', 'bing', 'microsoft', 'facebook', 'youtube', 'doarbai', 
+                      'termohabitat', 'kaufland', 'wikipedia', 'emag']
+            
+            # Pattern: URL .ro urmat de text care conține preț
+            # Sau preț urmat de domain .ro
+            
+            body_text = page.locator('body').inner_text()
+            
+            # Salvează text pentru debug
+            with open(f"{DEBUG_DIR}/bing_{sku}.txt", 'w') as f:
+                f.write(body_text)
+            
+            # Găsește toate domeniile .ro valide
+            domains = re.findall(r'(?:https?://)?(?:www\.)?([a-z0-9-]+\.ro)', body_text.lower())
+            valid_domains = []
+            for d in domains:
+                if len(d) > 5 and not any(b in d for b in blocked):
+                    if d not in valid_domains:
+                        valid_domains.append(d)
+            
+            logger.info(f"   🌐 Domenii găsite: {valid_domains[:8]}")
+            
+            # Găsește toate prețurile
+            prices = re.findall(r'([\d.,]+)\s*(?:RON|Lei|ron|lei)', body_text)
+            valid_prices = [clean_price(p) for p in prices]
+            valid_prices = [p for p in valid_prices if p > 0]
+            
+            logger.info(f"   💰 Prețuri găsite: {valid_prices[:8]}")
+            
+            # Asociază: pentru fiecare domain, caută prețul cel mai aproape
+            for domain in valid_domains[:10]:
+                # Găsește poziția domeniului în text
+                pos = body_text.lower().find(domain)
+                if pos == -1:
+                    continue
+                
+                # Caută preț în zona ±300 caractere
+                start = max(0, pos - 300)
+                end = min(len(body_text), pos + 300)
+                context_text = body_text[start:end]
+                
+                price_match = re.search(r'([\d.,]+)\s*(?:RON|Lei|ron|lei)', context_text)
+                if price_match:
+                    price = clean_price(price_match.group(1))
+                    if price > 0:
+                        # Verifică să nu fie duplicat
+                        if not any(r['name'] == domain for r in found):
                             found.append({
                                 'name': domain,
                                 'price': price,
-                                'url': href,
+                                'url': f"https://www.{domain}",
                                 'method': 'Bing'
                             })
                             logger.info(f"   ✅ {domain}: {price} Lei")
-                            
-                except Exception as e:
-                    logger.info(f"   ❌ Error result {i}: {str(e)[:50]}")
             
-            logger.info(f"   📋 Total găsite: {len(found)}")
+            logger.info(f"   📋 Total: {len(found)}")
             
         except Exception as e:
             logger.info(f"   ❌ Error: {str(e)[:50]}")
@@ -128,19 +140,11 @@ def scan_product(sku, name, your_price=0):
         
         browser.close()
     
-    # Deduplicate
-    seen = {}
-    unique = []
     for r in found:
-        if r['name'] not in seen:
-            seen[r['name']] = r
-            unique.append(r)
-    
-    for r in unique:
         r['diff'] = round(((r['price'] - your_price) / your_price) * 100, 1) if your_price > 0 else 0
     
-    unique.sort(key=lambda x: x['price'])
-    return unique[:5]
+    found.sort(key=lambda x: x['price'])
+    return found[:5]
 
 @app.route('/')
 def index():
@@ -161,5 +165,5 @@ def get_debug(filename):
     return "Not found", 404
 
 if __name__ == '__main__':
-    logger.info("🚀 PriceMonitor v8.0 (Simple Debug) pe :8080")
+    logger.info("🚀 PriceMonitor v8.1 (Full Text Extract) pe :8080")
     app.run(host='0.0.0.0', port=8080)
