@@ -73,8 +73,8 @@ def validate_dimensions(sku_name, snippet_text, threshold=0.7):
 
 # ============ V12.6 - EXTRACTOR UNIVERSAL CU PRIORITATE MAXIMĂ ============
 def extract_instock_price(text):
-    """V12.6 - Prețul cu 'In stock' - PRIORITATE MAXIMĂ - format: 7.767,00 RON · In stock"""
-    match = re.search(r'(\d{1,3}(?:\.\d{3})*,\d{2})\s*RON\s*[·•]\s*In stock', text, re.IGNORECASE)
+    """V12.7 - Prețul cu 'In stock/În stoc' - PRIORITATE MAXIMĂ"""
+    match = re.search(r'(\d{1,3}(?:\.\d{3})*,\d{2})\s*RON\s*[·•]\s*[ÎI]n stoc(?:k)?', text, re.IGNORECASE)
     if match:
         price_str = match.group(1).replace('.', '').replace(',', '.')
         try:
