@@ -71,7 +71,7 @@ def validate_dimensions(sku_name, snippet_text, threshold=0.7):
         'reason': f"Match {len(matches)}/{len(sku_dims_norm)}" if is_valid else f"Mismatch {len(matches)}/{len(sku_dims_norm)}"
     }
 
-# ============ SPECIAL EXTRACTORS (V10.8) ============
+# ============ SPECIAL EXTRACTORS (V12.2) ============
 def extract_foglia_price(text):
     """Foglia: PREȚ RON · In stock"""
     match = re.search(r'([\d.,]+)\s*RON\s*[·●]\s*(?:●\s*)?[ÎI]n stoc', text, re.IGNORECASE)
@@ -116,6 +116,16 @@ def extract_germanquality_price(text):
             prices.append(price)
     return max(prices) if prices else None
 
+def extract_germanquality_price_fixed(text):
+    """V12.1 FIX: MIN price (main product) instead of MAX"""
+    prices = []
+    matches = re.finditer(r'([\d.,]+)\s*(?:RON|Lei)', text, re.IGNORECASE)
+    for match in matches:
+        price = clean_price(match.group(1))
+        if price > 0:
+            prices.append(price)
+    return min(prices) if prices else None
+
 def extract_neakaisa_price(text):
     """Neakaisa: max price (main product)"""
     prices = []
@@ -126,14 +136,24 @@ def extract_neakaisa_price(text):
             prices.append(price)
     return max(prices) if prices else None
 
+def extract_sensodays_price_fixed(text):
+    """V12.2 FIX: MIN price for SensoDays"""
+    prices = []
+    matches = re.finditer(r'([\d.,]+)\s*(?:RON|Lei)', text, re.IGNORECASE)
+    for match in matches:
+        price = clean_price(match.group(1))
+        if price > 0:
+            prices.append(price)
+    return min(prices) if prices else None
 
 def filter_single_source_arhitecthuro(results):
     """V11.1 - Elimina arhitecthuro.ro daca apare DOAR intr-o singura sursa"""
-    arhitecthuro_sources = [r['source'] for r in results if r['name'] == 'arhitecthuro.ro']
+    arhitecthuro_sources = [r['source'] for r in results if r.get('name') == 'arhitecthuro.ro']
     if len(arhitecthuro_sources) == 1:
-        results = [r for r in results if r['domain'] != 'arhitecthuro.ro']
+        results = [r for r in results if r.get('name') != 'arhitecthuro.ro']
         logger.info(f"   🔻 Arhitecthuro filtered (single source)")
     return results
+
 BLOCKED = ['google', 'bing', 'microsoft', 'facebook', 'youtube', 'doarbai', 'termohabitat', 'wikipedia', 'amazon', 'ebay', 'compari.ro']
 
 SEARCH_URLS = {
@@ -325,7 +345,7 @@ def google_stealth_search(page, query, sku_for_match=None, sku_name=None):
                 
                 # SPECIAL GERMANQUALITY
                 if current_domain == 'germanquality.ro':
-                    gq_price = extract_germanquality_price(context)
+                    gq_price = extract_germanquality_price_fixed(context)
                     if gq_price and gq_price > 0:
                         if not any(r['domain'] == current_domain for r in results):
                             results.append({'domain': current_domain, 'price': gq_price, 'source': 'Google SERP (GQ)'})
@@ -357,6 +377,15 @@ def google_stealth_search(page, query, sku_for_match=None, sku_name=None):
                         if not any(r['domain'] == current_domain for r in results):
                             results.append({'domain': current_domain, 'price': neakaisa_price, 'source': 'Google SERP (Neakaisa)'})
                             logger.info(f"      🟤 {current_domain}: {neakaisa_price} Lei (Neakaisa)")
+                        continue
+                
+                # SPECIAL SENSODAYS
+                if current_domain == 'sensodays.ro':
+                    sensodays_price = extract_sensodays_price_fixed(context)
+                    if sensodays_price and sensodays_price > 0:
+                        if not any(r['domain'] == current_domain for r in results):
+                            results.append({'domain': current_domain, 'price': sensodays_price, 'source': 'Google SERP (Sensodays)'})
+                            logger.info(f"      🟢 {current_domain}: {sensodays_price} Lei (Sensodays)")
                         continue
                 
                 # Generic extraction
@@ -403,7 +432,7 @@ def google_stealth_search(page, query, sku_for_match=None, sku_name=None):
                     block_end = min(len(lines), domain_line + 7)
                     block_text = ' '.join(lines[block_start:block_end])
                     
-                    gq_price = extract_germanquality_price(block_text)
+                    gq_price = extract_germanquality_price_fixed(block_text)
                     if gq_price and gq_price > 0:
                         results.append({'domain': current_domain, 'price': gq_price, 'source': 'Google SERP (GQ)'})
                         logger.info(f"      🟠 {current_domain}: {gq_price} Lei (GQ)")
@@ -433,7 +462,7 @@ def google_stealth_search(page, query, sku_for_match=None, sku_name=None):
                     
                     # BAGNO
                     if current_domain == 'bagno.ro':
-                        bagno_price = extract_bagno_price(block_text)
+                        bagno_price = extract_bagno_price_fixed(block_text)
                         if bagno_price and bagno_price > 0:
                             results.append({'domain': current_domain, 'price': bagno_price, 'source': 'Google SERP (Bagno)'})
                             logger.info(f"      🟡 {current_domain}: {bagno_price} Lei (Bagno)")
@@ -447,6 +476,16 @@ def google_stealth_search(page, query, sku_for_match=None, sku_name=None):
                         if neakaisa_price and neakaisa_price > 0:
                             results.append({'domain': current_domain, 'price': neakaisa_price, 'source': 'Google SERP (Neakaisa)'})
                             logger.info(f"      🟤 {current_domain}: {neakaisa_price} Lei (Neakaisa)")
+                            current_domain = None
+                            domain_line = -1
+                            continue
+                    
+                    # SENSODAYS
+                    if current_domain == 'sensodays.ro':
+                        sensodays_price = extract_sensodays_price_fixed(block_text)
+                        if sensodays_price and sensodays_price > 0:
+                            results.append({'domain': current_domain, 'price': sensodays_price, 'source': 'Google SERP (Sensodays)'})
+                            logger.info(f"      🟢 {current_domain}: {sensodays_price} Lei (Sensodays)")
                             current_domain = None
                             domain_line = -1
                             continue
@@ -705,5 +744,5 @@ def get_debug(filename):
     return "Not found", 404
 
 if __name__ == '__main__':
-    logger.info("🚀 PriceMonitor v12.0 - Bagno FIX MIN + Arhitecthuro Filter + Clean SERP (Foglia+Bagno+GermanQuality+Neakaisa, Metoda 3 BLOCKED filtered) pe :8080")
+    logger.info("🚀 PriceMonitor v12.2 - GermanQuality+SensoDays MIN fix (Foglia+Bagno+GermanQuality+Neakaisa+Sensodays) pe :8080")
     app.run(host='0.0.0.0', port=8080)
