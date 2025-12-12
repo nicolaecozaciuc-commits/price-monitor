@@ -307,11 +307,11 @@ def extract_from_google_html(page, sku):
     
     return results
 
-def google_stealth_search(page, query, sku_for_match=None, sku_name=None):
+def google_stealth_search(page, query, sku_for_match=None, sku_name=None, add_price_suffix=True):
     """Google search cu Metoda 1 (line), Metoda 2 (bloc), Metoda 3 (HTML)"""
     results = []
-    search_query = f"{query} pret RON"
-    url = f"https://www.google.com/search?q={quote_plus(search_query)}&hl=ro&gl=ro&filter=0&num=20"
+    search_query = f"{query} pret RON" if add_price_suffix else query
+    url = f"https://www.google.com/search?q={quote_plus(search_query)}&hl=ro&gl=ro"
     file_suffix = sku_for_match or query.replace(' ', '_')[:20]
     
     try:
@@ -712,6 +712,21 @@ def scan_product(sku, name, your_price=0):
                         })
                         logger.info(f"      🟡 {r['domain']}: {r['price']} Lei (din denumire)")
             
+            # ============ V12.7 ADĂUGAT: Google #3 - Căutare simplă doar cu SKU ============
+            if len(found) < 5:
+                logger.info(f"   🔍 Google #3: SKU simplu...")
+                google_results_simple = google_stealth_search(page, sku, f"{sku}_simple", sku_name=name, add_price_suffix=False)
+                
+                for r in google_results_simple:
+                    if r['price'] > 0 and not any(f['name'] == r['domain'] for f in found):
+                        found.append({
+                            'name': r['domain'],
+                            'price': r['price'],
+                            'url': f"https://www.{r['domain']}",
+                            'method': 'Google Simple'
+                        })
+                        logger.info(f"      🔵 {r['domain']}: {r['price']} Lei (simplu)")
+            
             if len(found) < 3:
                 logger.info(f"   🔍 Bing completează...")
                 query = f"{sku} pret"
@@ -853,5 +868,5 @@ def api_report():
         return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
-    logger.info("🚀 PriceMonitor v12.7 - filter=0 num=20 pe :8080")
+    logger.info("🚀 PriceMonitor v12.7 - Google #3 simplu pe :8080")
     app.run(host='0.0.0.0', port=8080)
