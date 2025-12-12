@@ -235,6 +235,7 @@ const Dashboard = () => {
                                 {selected.size > 0 && <button onClick={runSelected} className="bg-green-600 px-4 py-2 rounded text-white font-bold hover:bg-green-700 border border-green-500">✅ Scanează {selected.size}</button>}
                                 <button onClick={runAll} disabled={!products.length} className="bg-blue-600 px-4 py-2 rounded text-white font-bold hover:bg-blue-700 disabled:opacity-50 border border-blue-500 transition">🚀 Scanează TOT</button>
                                 {products.some(p => p.comps?.length > 0) && <button onClick={exportResults} className="bg-purple-600 px-4 py-2 rounded text-white font-bold hover:bg-purple-700 border border-purple-500 transition">📥 Export</button>}
+                                {products.some(p => p.comps?.length > 0) && <button onClick={() => window.location.href='/api/report'} className="bg-emerald-600 px-4 py-2 rounded text-white font-bold hover:bg-emerald-700 border border-emerald-500 transition">📊 Excel</button>}
                             </>
                         )}
                     </div>
