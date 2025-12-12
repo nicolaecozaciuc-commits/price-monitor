@@ -26,6 +26,7 @@ const Dashboard = () => {
     const [autoStart, setAutoStart] = useState(false);
     const [lastRunDate, setLastRunDate] = useState(null);
     const [stats, setStats] = useState({total: 0, checked: 0, withPrice: 0});
+    const [searchTerm, setSearchTerm] = useState("");
     const stopSignal = useRef(false);
 
     const normalize = (str) => {
@@ -145,7 +146,12 @@ const Dashboard = () => {
 
     const handleStop = () => { if (confirm("Oprești scanarea?")) stopSignal.current = true; };
     const toggleSelect = (id) => { const newSel = new Set(selected); if (newSel.has(id)) newSel.delete(id); else newSel.add(id); setSelected(newSel); };
-    const toggleAll = () => { if (selected.size === products.length) setSelected(new Set()); else setSelected(new Set(products.map(p => p.id))); };
+    const toggleAll = () => { if (selected.size === filteredProducts.length) setSelected(new Set()); else setSelected(new Set(filteredProducts.map(p => p.id))); };
+
+    const filteredProducts = products.filter(p => 
+        p.sku.toLowerCase().includes(searchTerm.toLowerCase()) || 
+        p.name.toLowerCase().includes(searchTerm.toLowerCase())
+    );
 
     const runScanQueue = (queueIds) => {
         if (!queueIds.length) return alert("Nimic de scanat!");
@@ -156,16 +162,16 @@ const Dashboard = () => {
             if (stopSignal.current) { setProgress(null); setAutoStart(false); alert("🛑 Scanare oprită."); return; }
             if (i >= queueIds.length) { setProgress(null); alert("✅ Scanare completă!"); return; }
             setProgress({cur: i + 1, tot: queueIds.length});
-            check(queueIds[i]).then(() => { i++; setTimeout(next, 5000); }); // 5s între produse (Google e lent)
+            check(queueIds[i]).then(() => { i++; setTimeout(next, 5000); });
         };
         next();
     };
 
     const runSelected = () => runScanQueue(Array.from(selected));
-    const runAll = () => { if (confirm(`Scanezi toate ${products.length} produse? (Va dura ~${Math.round(products.length * 0.5)} min)`)) runScanQueue(products.map(p => p.id)); };
+    const runAll = () => { if (confirm(`Scanezi toate ${filteredProducts.length} produse? (Va dura ~${Math.round(filteredProducts.length * 0.5)} min)`)) runScanQueue(filteredProducts.map(p => p.id)); };
 
     const exportResults = () => {
-        const checkedProducts = products.filter(p => p.comps && p.comps.length > 0);
+        const checkedProducts = filteredProducts.filter(p => p.comps && p.comps.length > 0);
         if (!checkedProducts.length) return alert("Nu sunt rezultate de exportat!");
         let csv = "SKU,Nume,Pret Tau,Site 1,Pret 1,Diff 1,Site 2,Pret 2,Diff 2,Site 3,Pret 3,Diff 3\n";
         checkedProducts.forEach(p => {
@@ -197,7 +203,6 @@ const Dashboard = () => {
         return () => clearInterval(timer);
     }, [autoStart, targetTime, products, progress, lastRunDate]);
 
-    // Format diferență cu culoare
     const DiffBadge = ({diff}) => {
         if (diff === undefined || diff === null) return null;
         const isNegative = diff < 0;
@@ -213,11 +218,25 @@ const Dashboard = () => {
     return (
         <div className="p-4 md:p-6 max-w-[98%] mx-auto">
             <div className="bg-[#1a1a1a] p-4 md:p-6 rounded-xl border border-[#333] mb-6">
-                <div className="flex flex-wrap justify-between items-center gap-4">
-                    <div>
+                <div className="flex flex-wrap justify-between items-center gap-4 mb-4">
+                    <div className="flex-1">
                         <h1 className="text-xl md:text-2xl font-bold text-white flex gap-2"><span>📊</span> PriceMonitor v2.0</h1>
                         <p className="text-gray-500 text-xs md:text-sm">Google Search + Direct Extraction • {stats.total} produse • {stats.checked} verificate</p>
                     </div>
+                </div>
+                
+                <div className="bg-[#222] p-3 rounded-lg border border-[#444] mb-4">
+                    <input 
+                        type="text" 
+                        placeholder="🔍 Cauta SKU sau nume..." 
+                        value={searchTerm} 
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                        className="w-full bg-[#333] text-white px-3 py-2 rounded border border-[#555] text-sm focus:outline-none focus:border-blue-500"
+                    />
+                    {searchTerm && <p className="text-xs text-gray-400 mt-2">📌 {filteredProducts.length} produse găsite</p>}
+                </div>
+
+                <div className="flex flex-wrap justify-between items-center gap-4">
                     <div className="flex items-center gap-2 bg-[#222] p-2 rounded-lg border border-[#444]">
                         <span className="text-gray-400 text-sm">⏰</span>
                         <input type="time" value={targetTime} onChange={(e) => setTargetTime(e.target.value)} className="bg-[#333] text-white px-2 py-1 rounded border border-[#555] text-sm w-24" disabled={autoStart}/>
@@ -233,9 +252,9 @@ const Dashboard = () => {
                             <>
                                 <label className="bg-[#333] px-4 py-2 rounded cursor-pointer hover:bg-[#444] text-white border border-[#555] text-sm font-bold transition">📂 CSV<input type="file" accept=".csv" onChange={handleUpload} className="hidden"/></label>
                                 {selected.size > 0 && <button onClick={runSelected} className="bg-green-600 px-4 py-2 rounded text-white font-bold hover:bg-green-700 border border-green-500">✅ Scanează {selected.size}</button>}
-                                <button onClick={runAll} disabled={!products.length} className="bg-blue-600 px-4 py-2 rounded text-white font-bold hover:bg-blue-700 disabled:opacity-50 border border-blue-500 transition">🚀 Scanează TOT</button>
-                                {products.some(p => p.comps?.length > 0) && <button onClick={exportResults} className="bg-purple-600 px-4 py-2 rounded text-white font-bold hover:bg-purple-700 border border-purple-500 transition">📥 Export</button>}
-                                {products.some(p => p.comps?.length > 0) && <button onClick={() => window.location.href='/api/report'} className="bg-emerald-600 px-4 py-2 rounded text-white font-bold hover:bg-emerald-700 border border-emerald-500 transition">📊 Excel</button>}
+                                <button onClick={runAll} disabled={!filteredProducts.length} className="bg-blue-600 px-4 py-2 rounded text-white font-bold hover:bg-blue-700 disabled:opacity-50 border border-blue-500 transition">🚀 Scanează TOT</button>
+                                {filteredProducts.some(p => p.comps?.length > 0) && <button onClick={exportResults} className="bg-purple-600 px-4 py-2 rounded text-white font-bold hover:bg-purple-700 border border-purple-500 transition">📥 Export</button>}
+                                {filteredProducts.some(p => p.comps?.length > 0) && <button onClick={() => window.location.href='/api/report'} className="bg-emerald-600 px-4 py-2 rounded text-white font-bold hover:bg-emerald-700 border border-emerald-500 transition">📊 Excel</button>}
                             </>
                         )}
                     </div>
@@ -246,7 +265,7 @@ const Dashboard = () => {
                 <table className="w-full text-left text-sm text-gray-300">
                     <thead className="bg-black text-gray-500 uppercase text-xs">
                         <tr>
-                            <th className="p-3 w-12 text-center"><input type="checkbox" onChange={toggleAll} checked={products.length > 0 && selected.size === products.length}/></th>
+                            <th className="p-3 w-12 text-center"><input type="checkbox" onChange={toggleAll} checked={filteredProducts.length > 0 && selected.size === filteredProducts.length}/></th>
                             <th className="p-3">PRODUS</th>
                             <th className="p-3 w-28">PREȚUL TĂU</th>
                             <th className="p-3">CONCURENȚĂ (Google + Direct)</th>
@@ -254,9 +273,9 @@ const Dashboard = () => {
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-[#2a2a2a]">
-                        {products.length === 0 ? (
-                            <tr><td colSpan="5" className="p-8 text-center text-gray-500">📂 Încarcă un fișier CSV pentru a începe</td></tr>
-                        ) : products.map(p => {
+                        {filteredProducts.length === 0 ? (
+                            <tr><td colSpan="5" className="p-8 text-center text-gray-500">{searchTerm ? '❌ Nu s-au găsit produse' : '📂 Încarcă un fișier CSV pentru a începe'}</td></tr>
+                        ) : filteredProducts.map(p => {
                             const minCompPrice = p.comps?.length > 0 ? Math.min(...p.comps.map(c => c.price)) : null;
                             const isCheaperThanAll = minCompPrice && p.price > 0 && p.price <= minCompPrice;
                             return (
