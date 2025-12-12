@@ -168,7 +168,7 @@ def filter_single_source_arhitecthuro(results):
         logger.info(f"   🔻 Arhitecthuro filtered (single source)")
     return results
 
-BLOCKED = ['google', 'bing', 'microsoft', 'facebook', 'youtube', 'doarbai', 'termohabitat', 'wikipedia', 'amazon', 'ebay', 'compari.ro']
+BLOCKED = ['u003e', 'google', 'bing', 'microsoft', 'facebook', 'youtube', 'doarbai', 'termohabitat', 'wikipedia', 'amazon', 'ebay', 'compari.ro']
 
 SEARCH_URLS = {
     'emag.ro': 'https://www.emag.ro/search/{}',
@@ -311,7 +311,7 @@ def google_stealth_search(page, query, sku_for_match=None, sku_name=None):
     """Google search cu Metoda 1 (line), Metoda 2 (bloc), Metoda 3 (HTML)"""
     results = []
     search_query = f"{query} pret RON"
-    url = f"https://www.google.com/search?q={quote_plus(search_query)}&hl=ro&gl=ro"
+    url = f"https://www.google.com/search?q={quote_plus(search_query)}&hl=ro&gl=ro&filter=0&num=20"
     file_suffix = sku_for_match or query.replace(' ', '_')[:20]
     
     try:
@@ -853,5 +853,5 @@ def api_report():
         return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
-    logger.info("🚀 PriceMonitor v12.6 - InStock priority pe :8080")
+    logger.info("🚀 PriceMonitor v12.7 - filter=0 num=20 pe :8080")
     app.run(host='0.0.0.0', port=8080)
