@@ -302,6 +302,16 @@ def extract_bagno_price(text):
             prices.append(price)
     return max(prices) if prices else None
 
+def extract_bagno_price_fixed(text):
+    """Bagno.ro FIXED: MIN price (first/main product)"""
+    prices = []
+    matches = re.finditer(r'([\d.,]+)\s*(?:RON|Lei)', text, re.IGNORECASE)
+    for match in matches:
+        price = clean_price(match.group(1))
+        if price > 0:
+            prices.append(price)
+    return min(prices) if prices else None
+
 def extract_germanquality_price(text):
     """Germanquality.ro: max price (main product)"""
     prices = []
@@ -312,6 +322,16 @@ def extract_germanquality_price(text):
             prices.append(price)
     return max(prices) if prices else None
 
+def extract_germanquality_price_fixed(text):
+    """Germanquality.ro FIXED: MIN price (first/main product)"""
+    prices = []
+    matches = re.finditer(r'([\d.,]+)\s*(?:RON|Lei)', text, re.IGNORECASE)
+    for match in matches:
+        price = clean_price(match.group(1))
+        if price > 0:
+            prices.append(price)
+    return min(prices) if prices else None
+
 def extract_neakaisa_price(text):
     """Neakaisa: max price (main product)"""
     prices = []
@@ -321,6 +341,16 @@ def extract_neakaisa_price(text):
         if price > 0:
             prices.append(price)
     return max(prices) if prices else None
+
+def extract_neakaisa_price_fixed(text):
+    """Neakaisa FIXED: MIN price (first/main product)"""
+    prices = []
+    matches = re.finditer(r'([\d.,]+)\s*(?:RON|Lei)', text, re.IGNORECASE)
+    for match in matches:
+        price = clean_price(match.group(1))
+        if price > 0:
+            prices.append(price)
+    return min(prices) if prices else None
 
 BLOCKED = ['google', 'bing', 'microsoft', 'facebook', 'youtube', 'doarbai', 'termohabitat', 'wikipedia', 'amazon', 'ebay', 'compari.ro']
 
@@ -509,7 +539,7 @@ def google_stealth_search(page, query, sku_for_match=None, sku_name=None):
                 context = ' '.join(lines[max(0,i-2):min(len(lines),i+3)])
                 
                 if current_domain == 'germanquality.ro':
-                    gq_price = extract_germanquality_price(context)
+                    gq_price = extract_germanquality_price_fixed(context)
                     if gq_price and gq_price > 0:
                         if not any(r['domain'] == current_domain for r in results):
                             if sku_name:
@@ -535,7 +565,7 @@ def google_stealth_search(page, query, sku_for_match=None, sku_name=None):
                         continue
                 
                 if current_domain == 'bagno.ro':
-                    bagno_price = extract_bagno_price(context)
+                    bagno_price = extract_bagno_price_fixed(context)
                     if bagno_price and bagno_price > 0:
                         if not any(r['domain'] == current_domain for r in results):
                             if sku_name:
@@ -548,7 +578,7 @@ def google_stealth_search(page, query, sku_for_match=None, sku_name=None):
                         continue
                 
                 if current_domain == 'neakaisa.ro':
-                    neakaisa_price = extract_neakaisa_price(context)
+                    neakaisa_price = extract_neakaisa_price_fixed(context)
                     if neakaisa_price and neakaisa_price > 0:
                         if not any(r['domain'] == current_domain for r in results):
                             if sku_name:
@@ -606,7 +636,7 @@ def google_stealth_search(page, query, sku_for_match=None, sku_name=None):
                     block_end = min(len(lines), domain_line + 7)
                     block_text = ' '.join(lines[block_start:block_end])
                     
-                    gq_price = extract_germanquality_price(block_text)
+                    gq_price = extract_germanquality_price_fixed(block_text)
                     if gq_price and gq_price > 0:
                         if sku_name:
                             dim_check = validate_dimensions(sku_name, block_text)
@@ -648,7 +678,7 @@ def google_stealth_search(page, query, sku_for_match=None, sku_name=None):
                             continue
                     
                     if current_domain == 'bagno.ro':
-                        bagno_price = extract_bagno_price(block_text)
+                        bagno_price = extract_bagno_price_fixed(block_text)
                         if bagno_price and bagno_price > 0:
                             if sku_name:
                                 dim_check = validate_dimensions(sku_name, block_text)
@@ -664,7 +694,7 @@ def google_stealth_search(page, query, sku_for_match=None, sku_name=None):
                             continue
                     
                     if current_domain == 'neakaisa.ro':
-                        neakaisa_price = extract_neakaisa_price(block_text)
+                        neakaisa_price = extract_neakaisa_price_fixed(block_text)
                         if neakaisa_price and neakaisa_price > 0:
                             if sku_name:
                                 dim_check = validate_dimensions(sku_name, block_text)
@@ -959,5 +989,5 @@ def get_debug(filename):
     return "Not found", 404
 
 if __name__ == '__main__':
-    logger.info("🚀 PriceMonitor v11.0 - Raport Excel FRUMOS - pe :8080")
+    logger.info("🚀 PriceMonitor v11.0 FIXED - Bagno/Neakaisa/Germanquality MIN price - pe :8080")
     app.run(host='0.0.0.0', port=8080)
