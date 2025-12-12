@@ -87,7 +87,7 @@ def extract_foglia_price(text):
     return None
 
 def extract_bagno_price(text):
-    """Bagno.ro: max price (main product)"""
+    """Bagno.ro: max price (main product) - OLD VERSION"""
     prices = []
     matches = re.finditer(r'([\d.,]+)\s*(?:RON|Lei)', text, re.IGNORECASE)
     for match in matches:
@@ -107,7 +107,7 @@ def extract_bagno_price_fixed(text):
     return min(prices) if prices else None
 
 def extract_germanquality_price(text):
-    """Germanquality.ro: max price (main product)"""
+    """Germanquality.ro: max price (main product) - OLD VERSION"""
     prices = []
     matches = re.finditer(r'([\d.,]+)\s*(?:RON|Lei)', text, re.IGNORECASE)
     for match in matches:
@@ -239,7 +239,6 @@ def extract_from_google_html(page, sku):
             domain = match.group(1).lower()
             price = clean_price(match.group(2))
             
-            # ✅ SKIP site-urile cu cache invalid
             if any(b in domain for b in BLOCKED):
                 continue
             
@@ -268,7 +267,6 @@ def extract_from_google_html(page, sku):
             price = clean_price(match.group(1))
             domain = match.group(2).lower()
             
-            # ✅ SKIP site-urile cu cache invalid
             if any(b in domain for b in BLOCKED):
                 continue
             
@@ -744,5 +742,5 @@ def get_debug(filename):
     return "Not found", 404
 
 if __name__ == '__main__':
-    logger.info("🚀 PriceMonitor v12.2 - GermanQuality+SensoDays MIN fix (Foglia+Bagno+GermanQuality+Neakaisa+Sensodays) pe :8080")
+    logger.info("🚀 PriceMonitor v12.2 - GermanQuality+SensoDays MIN fix pe :8080")
     app.run(host='0.0.0.0', port=8080)
