@@ -4,12 +4,9 @@ import time
 import json
 import os
 from urllib.parse import quote_plus
-from datetime import datetime
 from flask import Flask, request, jsonify, render_template, send_file
 from flask_cors import CORS
 from playwright.sync_api import sync_playwright
-from openpyxl import Workbook
-from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 
 app = Flask(__name__, template_folder='templates')
 CORS(app)
@@ -20,177 +17,11 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s | %(message)s', date
 logger = logging.getLogger('PriceMonitor')
 
 DEBUG_DIR = '/root/monitor/debug'
-DATA_DIR = '/root/monitor/data'
 os.makedirs(DEBUG_DIR, exist_ok=True)
-os.makedirs(DATA_DIR, exist_ok=True)
 
-SCANS_FILE = f'{DATA_DIR}/scans.json'
-
-def load_scans():
-    if os.path.exists(SCANS_FILE):
-        try:
-            with open(SCANS_FILE, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        except:
-            return []
-    return []
-
-def save_scan(sku, name, your_price, competitors):
-    scans = load_scans()
-    scan_entry = {
-        'timestamp': datetime.now().isoformat(),
-        'sku': sku,
-        'name': name,
-        'your_price': your_price,
-        'competitors': competitors
-    }
-    scans.append(scan_entry)
-    with open(SCANS_FILE, 'w', encoding='utf-8') as f:
-        json.dump(scans, f, ensure_ascii=False, indent=2)
-    return scan_entry
-
-def generate_excel_report():
-    scans = load_scans()
-    if not scans:
-        return None
-    
-    wb = Workbook()
-    ws = wb.active
-    ws.title = 'Rezumat'
-    
-    title_fill = PatternFill(start_color='1F4E78', end_color='1F4E78', fill_type='solid')
-    title_font = Font(bold=True, color='FFFFFF', size=14)
-    header_fill = PatternFill(start_color='4472C4', end_color='4472C4', fill_type='solid')
-    header_font = Font(bold=True, color='FFFFFF', size=11)
-    product_fill = PatternFill(start_color='D9E1F2', end_color='D9E1F2', fill_type='solid')
-    product_font = Font(bold=True, size=11)
-    competitor_fill = PatternFill(start_color='E7E6E6', end_color='E7E6E6', fill_type='solid')
-    border_thin = Border(left=Side(style='thin', color='000000'), right=Side(style='thin', color='000000'), top=Side(style='thin', color='000000'), bottom=Side(style='thin', color='000000'))
-    
-    ws.merge_cells('A1:H1')
-    title = ws['A1']
-    title.value = 'RAPORT MONITORIZARE PREȚURI'
-    title.font = title_font
-    title.fill = title_fill
-    title.alignment = Alignment(horizontal='center', vertical='center')
-    ws.row_dimensions[1].height = 25
-    
-    ws.merge_cells('A2:H2')
-    date_cell = ws['A2']
-    date_cell.value = f"Generat: {datetime.now().strftime('%d.%m.%Y %H:%M')}"
-    date_cell.font = Font(italic=True, size=10)
-    date_cell.alignment = Alignment(horizontal='right')
-    
-    ws.row_dimensions[3].height = 5
-    row = 4
-    
-    for scan in scans:
-        sku = scan.get('sku', 'N/A')
-        name = scan.get('name', 'N/A')[:50]
-        your_price = scan.get('your_price', 0)
-        competitors = scan.get('competitors', [])
-        timestamp = scan.get('timestamp', '').split('T')[0]
-        
-        ws.merge_cells(f'A{row}:H{row}')
-        prod_header = ws[f'A{row}']
-        prod_header.value = f"SKU: {sku} | {name}"
-        prod_header.font = product_font
-        prod_header.fill = product_fill
-        prod_header.border = border_thin
-        prod_header.alignment = Alignment(horizontal='left', vertical='center', wrap_text=True)
-        ws.row_dimensions[row].height = 20
-        row += 1
-        
-        ws[f'A{row}'].value = 'Preț Nostru:'
-        ws[f'A{row}'].font = Font(bold=True)
-        ws[f'B{row}'].value = f"{your_price:.2f} Lei"
-        ws[f'B{row}'].font = Font(bold=True, color='008000', size=12)
-        ws[f'C{row}'].value = f'Data: {timestamp}'
-        ws[f'C{row}'].font = Font(italic=True, size=9)
-        ws.row_dimensions[row].height = 18
-        row += 1
-        
-        headers = ['Competitor', 'Preț', 'Diferență', 'Status', 'Metodă']
-        for col, header in enumerate(headers, 1):
-            cell = ws.cell(row=row, column=col)
-            cell.value = header
-            cell.font = header_font
-            cell.fill = header_fill
-            cell.border = border_thin
-            cell.alignment = Alignment(horizontal='center', vertical='center')
-        ws.row_dimensions[row].height = 16
-        row += 1
-        
-        for comp in competitors:
-            domain = comp.get('name', 'N/A')
-            price = comp.get('price', 0)
-            diff = comp.get('diff', 0)
-            method = comp.get('method', 'N/A')
-            
-            if diff < -10:
-                status_color = '008000'
-                status_text = '✓ IEFTIN'
-            elif diff > 10:
-                status_color = 'FF0000'
-                status_text = '✗ SCUMP'
-            else:
-                status_color = '000000'
-                status_text = '= EGAL'
-            
-            ws[f'A{row}'].value = domain
-            ws[f'B{row}'].value = price
-            ws[f'B{row}'].number_format = '#,##0.00 "Lei"'
-            ws[f'C{row}'].value = f"{diff:+.1f}%"
-            ws[f'C{row}'].font = Font(bold=True, color=status_color)
-            ws[f'D{row}'].value = status_text
-            ws[f'D{row}'].font = Font(color=status_color, bold=True)
-            ws[f'E{row}'].value = method
-            
-            for col in range(1, 6):
-                ws.cell(row=row, column=col).fill = competitor_fill
-                ws.cell(row=row, column=col).border = border_thin
-                ws.cell(row=row, column=col).alignment = Alignment(horizontal='center', vertical='center')
-            
-            ws.row_dimensions[row].height = 16
-            row += 1
-        
-        ws.row_dimensions[row].height = 8
-        row += 1
-    
-    ws.column_dimensions['A'].width = 18
-    ws.column_dimensions['B'].width = 15
-    ws.column_dimensions['C'].width = 12
-    ws.column_dimensions['D'].width = 12
-    ws.column_dimensions['E'].width = 18
-    
-    ws2 = wb.create_sheet('Statistici')
-    ws2['A1'].value = 'STATISTICI'
-    ws2['A1'].font = Font(bold=True, size=12, color='FFFFFF')
-    ws2['A1'].fill = title_fill
-    ws2['A1'].alignment = Alignment(horizontal='center')
-    ws2.merge_cells('A1:D1')
-    
-    total_scans = len(scans)
-    total_competitors = sum(len(s.get('competitors', [])) for s in scans)
-    
-    ws2['A3'].value = 'Total Produse Scanate:'
-    ws2['B3'].value = total_scans
-    ws2['B3'].font = Font(bold=True, size=12, color='0070C0')
-    
-    ws2['A4'].value = 'Total Competitori Găsiți:'
-    ws2['B4'].value = total_competitors
-    ws2['B4'].font = Font(bold=True, size=12, color='0070C0')
-    
-    ws2.column_dimensions['A'].width = 25
-    ws2.column_dimensions['B'].width = 15
-    
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    filename = f'{DATA_DIR}/Raport_Preturi_FRUMOS_{timestamp}.xlsx'
-    wb.save(filename)
-    
-    return filename
-
+# ============ DIMENSION VALIDATION (V10.7) ============
 def extract_dimensions(text):
+    """Extract dimensions: 180x80, 180×80, 180 x 80"""
     if not text:
         return []
     pattern = r'(\d+)\s*[x×]\s*(\d+)'
@@ -203,6 +34,7 @@ def extract_dimensions(text):
     return dimensions
 
 def normalize_dimensions(dim_list):
+    """Normalize for comparison: [180x80] → [80x180]"""
     normalized = []
     for dim in dim_list:
         parts = dim.split('x')
@@ -217,6 +49,7 @@ def normalize_dimensions(dim_list):
     return sorted(normalized)
 
 def validate_dimensions(sku_name, snippet_text, threshold=0.7):
+    """Compare SKU dimensions vs snippet dimensions"""
     sku_dims = extract_dimensions(sku_name)
     snippet_dims = extract_dimensions(snippet_text)
     
@@ -238,7 +71,9 @@ def validate_dimensions(sku_name, snippet_text, threshold=0.7):
         'reason': f"Match {len(matches)}/{len(sku_dims_norm)}" if is_valid else f"Mismatch {len(matches)}/{len(sku_dims_norm)}"
     }
 
+# ============ SPECIAL EXTRACTORS (V10.8) ============
 def extract_foglia_price(text):
+    """Foglia: PREȚ RON · In stock"""
     match = re.search(r'([\d.,]+)\s*RON\s*[·●]\s*(?:●\s*)?[ÎI]n stoc', text, re.IGNORECASE)
     if match:
         price = clean_price(match.group(1))
@@ -262,7 +97,7 @@ def extract_bagno_price(text):
     return max(prices) if prices else None
 
 def extract_bagno_price_fixed(text):
-    """Bagno.ro FIXED: MIN price (first/main product)"""
+    """V12.0 FIX: MIN price (first/main product) instead of MAX"""
     prices = []
     matches = re.finditer(r'([\d.,]+)\s*(?:RON|Lei)', text, re.IGNORECASE)
     for match in matches:
@@ -291,14 +126,14 @@ def extract_neakaisa_price(text):
             prices.append(price)
     return max(prices) if prices else None
 
+
 def filter_single_source_arhitecthuro(results):
     """V11.1 - Elimina arhitecthuro.ro daca apare DOAR intr-o singura sursa"""
-    arhitecthuro_sources = [r['source'] for r in results if r['name'] == 'arhitecthuro.ro']
+    arhitecthuro_sources = [r['source'] for r in results if r['domain'] == 'arhitecthuro.ro']
     if len(arhitecthuro_sources) == 1:
-        results = [r for r in results if r['name'] != 'arhitecthuro.ro']
+        results = [r for r in results if r['domain'] != 'arhitecthuro.ro']
         logger.info(f"   🔻 Arhitecthuro filtered (single source)")
     return results
-
 BLOCKED = ['google', 'bing', 'microsoft', 'facebook', 'youtube', 'doarbai', 'termohabitat', 'wikipedia', 'amazon', 'ebay', 'compari.ro']
 
 SEARCH_URLS = {
@@ -365,7 +200,9 @@ def extract_prices_from_text(text):
             prices.append(p)
     return prices[:10]
 
+# ============ METODA 3: EXTRACȚIE HTML STRUCTURAT (RAFINATĂ) ============
 def extract_from_google_html(page, sku):
+    """Extrage prețuri din HTML - SKIPEAZĂ site-urile din BLOCKED"""
     results = []
     try:
         html_content = page.content()
@@ -382,6 +219,7 @@ def extract_from_google_html(page, sku):
             domain = match.group(1).lower()
             price = clean_price(match.group(2))
             
+            # ✅ SKIP site-urile cu cache invalid
             if any(b in domain for b in BLOCKED):
                 continue
             
@@ -410,6 +248,7 @@ def extract_from_google_html(page, sku):
             price = clean_price(match.group(1))
             domain = match.group(2).lower()
             
+            # ✅ SKIP site-urile cu cache invalid
             if any(b in domain for b in BLOCKED):
                 continue
             
@@ -437,6 +276,7 @@ def extract_from_google_html(page, sku):
     return results
 
 def google_stealth_search(page, query, sku_for_match=None, sku_name=None):
+    """Google search cu Metoda 1 (line), Metoda 2 (bloc), Metoda 3 (HTML)"""
     results = []
     search_query = f"{query} pret RON"
     url = f"https://www.google.com/search?q={quote_plus(search_query)}&hl=ro&gl=ro"
@@ -483,11 +323,12 @@ def google_stealth_search(page, query, sku_for_match=None, sku_name=None):
             if has_match and current_domain:
                 context = ' '.join(lines[max(0,i-2):min(len(lines),i+3)])
                 
+                # SPECIAL GERMANQUALITY
                 if current_domain == 'germanquality.ro':
                     gq_price = extract_germanquality_price(context)
                     if gq_price and gq_price > 0:
                         if not any(r['domain'] == current_domain for r in results):
-                            if sku_name and extract_dimensions(query):
+                            if sku_name:
                                 dim_check = validate_dimensions(sku_name, context)
                                 if not dim_check['valid']:
                                     logger.info(f"      🔴 {current_domain}: {gq_price} Lei - REJECTED (dims: {dim_check['reason']})")
@@ -496,11 +337,12 @@ def google_stealth_search(page, query, sku_for_match=None, sku_name=None):
                             logger.info(f"      🟠 {current_domain}: {gq_price} Lei (GQ)")
                         continue
                 
+                # SPECIAL FOGLIA
                 if current_domain == 'foglia.ro':
                     foglia_price = extract_foglia_price(context)
                     if foglia_price and foglia_price > 0:
                         if not any(r['domain'] == current_domain for r in results):
-                            if sku_name and extract_dimensions(query):
+                            if sku_name:
                                 dim_check = validate_dimensions(sku_name, context)
                                 if not dim_check['valid']:
                                     logger.info(f"      🔴 {current_domain}: {foglia_price} Lei - REJECTED (dims: {dim_check['reason']})")
@@ -509,11 +351,12 @@ def google_stealth_search(page, query, sku_for_match=None, sku_name=None):
                             logger.info(f"      🟣 {current_domain}: {foglia_price} Lei (Foglia)")
                         continue
                 
+                # SPECIAL BAGNO
                 if current_domain == 'bagno.ro':
                     bagno_price = extract_bagno_price_fixed(context)
                     if bagno_price and bagno_price > 0:
                         if not any(r['domain'] == current_domain for r in results):
-                            if sku_name and extract_dimensions(query):
+                            if sku_name:
                                 dim_check = validate_dimensions(sku_name, context)
                                 if not dim_check['valid']:
                                     logger.info(f"      🔴 {current_domain}: {bagno_price} Lei - REJECTED (dims: {dim_check['reason']})")
@@ -522,11 +365,12 @@ def google_stealth_search(page, query, sku_for_match=None, sku_name=None):
                             logger.info(f"      🟡 {current_domain}: {bagno_price} Lei (Bagno)")
                         continue
                 
+                # SPECIAL NEAKAISA
                 if current_domain == 'neakaisa.ro':
                     neakaisa_price = extract_neakaisa_price(context)
                     if neakaisa_price and neakaisa_price > 0:
                         if not any(r['domain'] == current_domain for r in results):
-                            if sku_name and extract_dimensions(query):
+                            if sku_name:
                                 dim_check = validate_dimensions(sku_name, context)
                                 if not dim_check['valid']:
                                     logger.info(f"      🔴 {current_domain}: {neakaisa_price} Lei - REJECTED (dims: {dim_check['reason']})")
@@ -535,6 +379,7 @@ def google_stealth_search(page, query, sku_for_match=None, sku_name=None):
                             logger.info(f"      🟤 {current_domain}: {neakaisa_price} Lei (Neakaisa)")
                         continue
                 
+                # Generic extraction
                 price_patterns = re.finditer(r'([\d.,]+)\s*(?:RON|Lei|lei)', context, re.IGNORECASE)
                 valid_prices = []
                 for pm in price_patterns:
@@ -551,7 +396,7 @@ def google_stealth_search(page, query, sku_for_match=None, sku_name=None):
                 
                 if valid_prices:
                     price = min(valid_prices)
-                    if sku_name and extract_dimensions(query):
+                    if sku_name:
                         dim_check = validate_dimensions(sku_name, context)
                         if not dim_check['valid']:
                             logger.info(f"      🔴 {current_domain}: {price} Lei - REJECTED (dims: {dim_check['reason']})")
@@ -562,6 +407,7 @@ def google_stealth_search(page, query, sku_for_match=None, sku_name=None):
         
         logger.info(f"   📸 Google: {len(results)} cu preț")
         
+        # ============ METODA 2: BLOC ============
         logger.info(f"   🔍 Metoda 2: bloc...")
         current_domain = None
         domain_line = -1
@@ -575,6 +421,7 @@ def google_stealth_search(page, query, sku_for_match=None, sku_name=None):
                     current_domain = d
                     domain_line = i
             
+            # DIRECT GERMANQUALITY extraction
             if current_domain and current_domain == 'germanquality.ro' and domain_line >= 0 and i <= domain_line + 6:
                 if not any(r['domain'] == current_domain for r in results):
                     block_start = domain_line
@@ -583,7 +430,7 @@ def google_stealth_search(page, query, sku_for_match=None, sku_name=None):
                     
                     gq_price = extract_germanquality_price(block_text)
                     if gq_price and gq_price > 0:
-                        if sku_name and extract_dimensions(query):
+                        if sku_name:
                             dim_check = validate_dimensions(sku_name, block_text)
                             if not dim_check['valid']:
                                 logger.info(f"      🔴 {current_domain}: {gq_price} Lei - REJECTED (dims: {dim_check['reason']})")
@@ -606,10 +453,11 @@ def google_stealth_search(page, query, sku_for_match=None, sku_name=None):
                     block_end = min(len(lines), domain_line + 7)
                     block_text = ' '.join(lines[block_start:block_end])
                     
+                    # FOGLIA
                     if current_domain == 'foglia.ro':
                         foglia_price = extract_foglia_price(block_text)
                         if foglia_price and foglia_price > 0:
-                            if sku_name and extract_dimensions(query):
+                            if sku_name:
                                 dim_check = validate_dimensions(sku_name, block_text)
                                 if not dim_check['valid']:
                                     logger.info(f"      🔴 {current_domain}: {foglia_price} Lei - REJECTED (dims: {dim_check['reason']})")
@@ -622,10 +470,11 @@ def google_stealth_search(page, query, sku_for_match=None, sku_name=None):
                             domain_line = -1
                             continue
                     
+                    # BAGNO
                     if current_domain == 'bagno.ro':
-                        bagno_price = extract_bagno_price_fixed(block_text)
+                        bagno_price = extract_bagno_price(block_text)
                         if bagno_price and bagno_price > 0:
-                            if sku_name and extract_dimensions(query):
+                            if sku_name:
                                 dim_check = validate_dimensions(sku_name, block_text)
                                 if not dim_check['valid']:
                                     logger.info(f"      🔴 {current_domain}: {bagno_price} Lei - REJECTED (dims: {dim_check['reason']})")
@@ -638,10 +487,11 @@ def google_stealth_search(page, query, sku_for_match=None, sku_name=None):
                             domain_line = -1
                             continue
                     
+                    # NEAKAISA
                     if current_domain == 'neakaisa.ro':
                         neakaisa_price = extract_neakaisa_price(block_text)
                         if neakaisa_price and neakaisa_price > 0:
-                            if sku_name and extract_dimensions(query):
+                            if sku_name:
                                 dim_check = validate_dimensions(sku_name, block_text)
                                 if not dim_check['valid']:
                                     logger.info(f"      🔴 {current_domain}: {neakaisa_price} Lei - REJECTED (dims: {dim_check['reason']})")
@@ -654,6 +504,7 @@ def google_stealth_search(page, query, sku_for_match=None, sku_name=None):
                             domain_line = -1
                             continue
                     
+                    # Generic bloc extraction
                     price_patterns = re.finditer(r'([\d.,]+)\s*(?:RON|Lei|lei)', block_text, re.IGNORECASE)
                     valid_prices = []
                     for pm in price_patterns:
@@ -670,7 +521,7 @@ def google_stealth_search(page, query, sku_for_match=None, sku_name=None):
                     
                     if valid_prices:
                         price = valid_prices[0]
-                        if sku_name and extract_dimensions(query):
+                        if sku_name:
                             dim_check = validate_dimensions(sku_name, block_text)
                             if not dim_check['valid']:
                                 logger.info(f"      🔴 {current_domain}: {price} Lei - REJECTED (dims: {dim_check['reason']})")
@@ -685,6 +536,7 @@ def google_stealth_search(page, query, sku_for_match=None, sku_name=None):
         
         logger.info(f"   📸 Total după bloc: {len(results)}")
         
+        # ========== METODA 3: HTML ==========
         html_results = extract_from_google_html(page, query)
         for r in html_results:
             if not any(existing['domain'] == r['domain'] for existing in results):
@@ -699,6 +551,7 @@ def google_stealth_search(page, query, sku_for_match=None, sku_name=None):
     return results
 
 def get_domains_from_bing(page, sku):
+    """Bing fallback"""
     results = []
     try:
         for block in page.locator('.b_algo').all()[:15]:
@@ -741,6 +594,7 @@ def get_domains_from_bing(page, sku):
     return results
 
 def find_price_on_site(page, domain, sku, save_debug=False):
+    """Visit site if needed"""
     search_url = SEARCH_URLS.get(domain, f'https://www.{domain}/search?q={{}}')
     sku_norm = normalize(sku)
     sku_lower = sku.lower()
@@ -819,8 +673,7 @@ def scan_product(sku, name, your_price=0):
                         'name': r['domain'],
                         'price': r['price'],
                         'url': f"https://www.{r['domain']}",
-                        'method': 'Google SKU',
-                        'source': r['source']
+                        'method': 'Google SKU'
                     })
             
             if len(found) < 5 and name and len(name) > 10:
@@ -838,8 +691,7 @@ def scan_product(sku, name, your_price=0):
                             'name': r['domain'],
                             'price': r['price'],
                             'url': f"https://www.{r['domain']}",
-                            'method': 'Google Name',
-                            'source': r['source']
+                            'method': 'Google Name'
                         })
                         logger.info(f"      🟡 {r['domain']}: {r['price']} Lei (din denumire)")
             
@@ -868,8 +720,7 @@ def scan_product(sku, name, your_price=0):
                             'name': r['domain'],
                             'price': r['price'],
                             'url': f"https://www.{r['domain']}",
-                            'method': 'Bing SERP',
-                            'source': r['source']
+                            'method': 'Bing SERP'
                         })
             
             logger.info(f"   📊 Total: {len(found)}")
@@ -902,29 +753,9 @@ def index():
 @app.route('/api/check', methods=['POST'])
 def api_check():
     data = request.json
-    sku = data.get('sku', '')
-    name = data.get('name', '')
     your_price = float(data.get('price', 0) or 0)
-    
-    results = scan_product(sku, name, your_price)
-    save_scan(sku, name, your_price, results)
-    
+    results = scan_product(data.get('sku', ''), data.get('name', ''), your_price)
     return jsonify({"status": "success", "competitors": results})
-
-@app.route('/api/report', methods=['GET'])
-def api_report():
-    try:
-        filepath = generate_excel_report()
-        if filepath and os.path.exists(filepath):
-            return send_file(filepath, as_attachment=True, download_name=f'Raport_Preturi_{datetime.now().strftime("%Y%m%d_%H%M%S")}.xlsx')
-        return jsonify({"status": "error", "message": "Nu sunt date de generat"}), 404
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-@app.route('/api/scans', methods=['GET'])
-def api_scans():
-    scans = load_scans()
-    return jsonify({"status": "success", "count": len(scans), "scans": scans})
 
 @app.route('/debug/<filename>')
 def get_debug(filename):
@@ -934,5 +765,5 @@ def get_debug(filename):
     return "Not found", 404
 
 if __name__ == '__main__':
-    logger.info("🚀 PriceMonitor v11.2 - Bagno FIX + Arhitecthuro Filter + Optional Dims - pe :8080")
+    logger.info("🚀 PriceMonitor v12.0 - Bagno FIX MIN + Arhitecthuro Filter + Clean SERP (Foglia+Bagno+GermanQuality+Neakaisa, Metoda 3 BLOCKED filtered) pe :8080")
     app.run(host='0.0.0.0', port=8080)
