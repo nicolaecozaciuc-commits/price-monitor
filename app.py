@@ -291,6 +291,14 @@ def extract_neakaisa_price(text):
             prices.append(price)
     return max(prices) if prices else None
 
+def filter_single_source_arhitecthuro(results):
+    """V11.1 FIXED - Elimina arhitecthuro.ro daca apare DOAR intr-o singura sursa"""
+    arhitecthuro_sources = [r['source'] for r in results if r['name'] == 'arhitecthuro.ro']
+    if len(arhitecthuro_sources) == 1:
+        results = [r for r in results if r['name'] != 'arhitecthuro.ro']
+        logger.info(f"   🔻 Arhitecthuro filtered (single source)")
+    return results
+
 BLOCKED = ['google', 'bing', 'microsoft', 'facebook', 'youtube', 'doarbai', 'termohabitat', 'wikipedia', 'amazon', 'ebay', 'compari.ro']
 
 SEARCH_URLS = {
@@ -426,14 +434,6 @@ def extract_from_google_html(page, sku):
     except Exception as e:
         logger.info(f"   ⚠️ HTML extract: {str(e)[:40]}")
     
-    return results
-
-def filter_single_source_arhitecthuro(results):
-    """V11.1 - Elimina arhitecthuro.ro daca apare DOAR intr-o singura sursa"""
-    arhitecthuro_sources = [r['source'] for r in results if r['domain'] == 'arhitecthuro.ro']
-    if len(arhitecthuro_sources) == 1:
-        results = [r for r in results if r['domain'] != 'arhitecthuro.ro']
-        logger.info(f"   🔻 Arhitecthuro filtered (single source)")
     return results
 
 def google_stealth_search(page, query, sku_for_match=None, sku_name=None):
@@ -819,7 +819,8 @@ def scan_product(sku, name, your_price=0):
                         'name': r['domain'],
                         'price': r['price'],
                         'url': f"https://www.{r['domain']}",
-                        'method': 'Google SKU'
+                        'method': 'Google SKU',
+                        'source': r['source']
                     })
             
             if len(found) < 5 and name and len(name) > 10:
@@ -837,7 +838,8 @@ def scan_product(sku, name, your_price=0):
                             'name': r['domain'],
                             'price': r['price'],
                             'url': f"https://www.{r['domain']}",
-                            'method': 'Google Name'
+                            'method': 'Google Name',
+                            'source': r['source']
                         })
                         logger.info(f"      🟡 {r['domain']}: {r['price']} Lei (din denumire)")
             
@@ -866,7 +868,8 @@ def scan_product(sku, name, your_price=0):
                             'name': r['domain'],
                             'price': r['price'],
                             'url': f"https://www.{r['domain']}",
-                            'method': 'Bing SERP'
+                            'method': 'Bing SERP',
+                            'source': r['source']
                         })
             
             logger.info(f"   📊 Total: {len(found)}")
@@ -931,5 +934,5 @@ def get_debug(filename):
     return "Not found", 404
 
 if __name__ == '__main__':
-    logger.info("🚀 PriceMonitor v11.1 - Bagno FIX + Arhitecthuro Filter - pe :8080")
+    logger.info("🚀 PriceMonitor v11.1 FIXED - Bagno FIX + Arhitecthuro Filter (VERIFIED) - pe :8080")
     app.run(host='0.0.0.0', port=8080)
