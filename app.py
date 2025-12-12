@@ -57,7 +57,7 @@ def save_scan(sku, name, your_price, competitors):
     return scan_entry
 
 def generate_excel_report():
-    """Generează raport Excel frumos și ușor de citit"""
+    """Generează raport Excel frumos și ușor de citit - V11.0"""
     scans = load_scans()
     
     if not scans:
@@ -388,7 +388,6 @@ def extract_prices_from_text(text):
             prices.append(p)
     return prices[:10]
 
-# ============ METODA 3: EXTRACȚIE HTML STRUCTURAT (RAFINATĂ) ============
 def extract_from_google_html(page, sku):
     """Extrage prețuri din HTML - SKIPEAZĂ site-urile din BLOCKED"""
     results = []
@@ -407,7 +406,6 @@ def extract_from_google_html(page, sku):
             domain = match.group(1).lower()
             price = clean_price(match.group(2))
             
-            # ✅ SKIP site-urile cu cache invalid
             if any(b in domain for b in BLOCKED):
                 continue
             
@@ -436,7 +434,6 @@ def extract_from_google_html(page, sku):
             price = clean_price(match.group(1))
             domain = match.group(2).lower()
             
-            # ✅ SKIP site-urile cu cache invalid
             if any(b in domain for b in BLOCKED):
                 continue
             
@@ -511,7 +508,6 @@ def google_stealth_search(page, query, sku_for_match=None, sku_name=None):
             if has_match and current_domain:
                 context = ' '.join(lines[max(0,i-2):min(len(lines),i+3)])
                 
-                # SPECIAL GERMANQUALITY
                 if current_domain == 'germanquality.ro':
                     gq_price = extract_germanquality_price(context)
                     if gq_price and gq_price > 0:
@@ -525,7 +521,6 @@ def google_stealth_search(page, query, sku_for_match=None, sku_name=None):
                             logger.info(f"      🟠 {current_domain}: {gq_price} Lei (GQ)")
                         continue
                 
-                # SPECIAL FOGLIA
                 if current_domain == 'foglia.ro':
                     foglia_price = extract_foglia_price(context)
                     if foglia_price and foglia_price > 0:
@@ -539,7 +534,6 @@ def google_stealth_search(page, query, sku_for_match=None, sku_name=None):
                             logger.info(f"      🟣 {current_domain}: {foglia_price} Lei (Foglia)")
                         continue
                 
-                # SPECIAL BAGNO
                 if current_domain == 'bagno.ro':
                     bagno_price = extract_bagno_price(context)
                     if bagno_price and bagno_price > 0:
@@ -553,7 +547,6 @@ def google_stealth_search(page, query, sku_for_match=None, sku_name=None):
                             logger.info(f"      🟡 {current_domain}: {bagno_price} Lei (Bagno)")
                         continue
                 
-                # SPECIAL NEAKAISA
                 if current_domain == 'neakaisa.ro':
                     neakaisa_price = extract_neakaisa_price(context)
                     if neakaisa_price and neakaisa_price > 0:
@@ -567,7 +560,6 @@ def google_stealth_search(page, query, sku_for_match=None, sku_name=None):
                             logger.info(f"      🟤 {current_domain}: {neakaisa_price} Lei (Neakaisa)")
                         continue
                 
-                # Generic extraction
                 price_patterns = re.finditer(r'([\d.,]+)\s*(?:RON|Lei|lei)', context, re.IGNORECASE)
                 valid_prices = []
                 for pm in price_patterns:
@@ -595,7 +587,6 @@ def google_stealth_search(page, query, sku_for_match=None, sku_name=None):
         
         logger.info(f"   📸 Google: {len(results)} cu preț")
         
-        # ============ METODA 2: BLOC ============
         logger.info(f"   🔍 Metoda 2: bloc...")
         current_domain = None
         domain_line = -1
@@ -609,7 +600,6 @@ def google_stealth_search(page, query, sku_for_match=None, sku_name=None):
                     current_domain = d
                     domain_line = i
             
-            # DIRECT GERMANQUALITY extraction
             if current_domain and current_domain == 'germanquality.ro' and domain_line >= 0 and i <= domain_line + 6:
                 if not any(r['domain'] == current_domain for r in results):
                     block_start = domain_line
@@ -641,7 +631,6 @@ def google_stealth_search(page, query, sku_for_match=None, sku_name=None):
                     block_end = min(len(lines), domain_line + 7)
                     block_text = ' '.join(lines[block_start:block_end])
                     
-                    # FOGLIA
                     if current_domain == 'foglia.ro':
                         foglia_price = extract_foglia_price(block_text)
                         if foglia_price and foglia_price > 0:
@@ -658,7 +647,6 @@ def google_stealth_search(page, query, sku_for_match=None, sku_name=None):
                             domain_line = -1
                             continue
                     
-                    # BAGNO
                     if current_domain == 'bagno.ro':
                         bagno_price = extract_bagno_price(block_text)
                         if bagno_price and bagno_price > 0:
@@ -675,7 +663,6 @@ def google_stealth_search(page, query, sku_for_match=None, sku_name=None):
                             domain_line = -1
                             continue
                     
-                    # NEAKAISA
                     if current_domain == 'neakaisa.ro':
                         neakaisa_price = extract_neakaisa_price(block_text)
                         if neakaisa_price and neakaisa_price > 0:
@@ -692,7 +679,6 @@ def google_stealth_search(page, query, sku_for_match=None, sku_name=None):
                             domain_line = -1
                             continue
                     
-                    # Generic bloc extraction
                     price_patterns = re.finditer(r'([\d.,]+)\s*(?:RON|Lei|lei)', block_text, re.IGNORECASE)
                     valid_prices = []
                     for pm in price_patterns:
@@ -724,7 +710,6 @@ def google_stealth_search(page, query, sku_for_match=None, sku_name=None):
         
         logger.info(f"   📸 Total după bloc: {len(results)}")
         
-        # ========== METODA 3: HTML ==========
         html_results = extract_from_google_html(page, query)
         for r in html_results:
             if not any(existing['domain'] == r['domain'] for existing in results):
@@ -945,15 +930,13 @@ def api_check():
     your_price = float(data.get('price', 0) or 0)
     
     results = scan_product(sku, name, your_price)
-    
-    # Salvează scanarea în JSON
     save_scan(sku, name, your_price, results)
     
     return jsonify({"status": "success", "competitors": results})
 
 @app.route('/api/report', methods=['GET'])
 def api_report():
-    """Generează și descarcă raportul Excel"""
+    """Generează și descarcă raportul Excel - V11.0"""
     try:
         filepath = generate_excel_report()
         if filepath and os.path.exists(filepath):
@@ -964,7 +947,7 @@ def api_report():
 
 @app.route('/api/scans', methods=['GET'])
 def api_scans():
-    """Returneaza lista de scanari"""
+    """Returneaza lista de scanari - V11.0"""
     scans = load_scans()
     return jsonify({"status": "success", "count": len(scans), "scans": scans})
 
@@ -976,5 +959,5 @@ def get_debug(filename):
     return "Not found", 404
 
 if __name__ == '__main__':
-    logger.info("🚀 PriceMonitor v10.8+ (cu Raport Excel) pe :8080")
+    logger.info("🚀 PriceMonitor v11.0 - Raport Excel FRUMOS - pe :8080")
     app.run(host='0.0.0.0', port=8080)
