@@ -428,6 +428,14 @@ def extract_from_google_html(page, sku):
     
     return results
 
+def filter_single_source_arhitecthuro(results):
+    """V11.1 - Elimina arhitecthuro.ro daca apare DOAR intr-o singura sursa"""
+    arhitecthuro_sources = [r['source'] for r in results if r['domain'] == 'arhitecthuro.ro']
+    if len(arhitecthuro_sources) == 1:
+        results = [r for r in results if r['domain'] != 'arhitecthuro.ro']
+        logger.info(f"   🔻 Arhitecthuro filtered (single source)")
+    return results
+
 def google_stealth_search(page, query, sku_for_match=None, sku_name=None):
     results = []
     search_query = f"{query} pret RON"
@@ -880,6 +888,7 @@ def scan_product(sku, name, your_price=0):
         if filtered_count > 0:
             logger.info(f"   🔻 Filtrat {filtered_count} outliers (±30%)")
     
+    found = filter_single_source_arhitecthuro(found)
     found.sort(key=lambda x: x['price'])
     return found[:5]
 
@@ -922,5 +931,5 @@ def get_debug(filename):
     return "Not found", 404
 
 if __name__ == '__main__':
-    logger.info("🚀 PriceMonitor v11.0 - Bagno FIX (MIN price) - pe :8080")
+    logger.info("🚀 PriceMonitor v11.1 - Bagno FIX + Arhitecthuro Filter - pe :8080")
     app.run(host='0.0.0.0', port=8080)
