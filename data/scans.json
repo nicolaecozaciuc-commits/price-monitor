@@ -1,0 +1,553 @@
+[
+  {
+    "timestamp": "2025-12-12T18:43:01.833668",
+    "sku": "R0466AC",
+    "name": "Rezervor incastrat cu clapetă Oleas M1 R0466, alb",
+    "your_price": 695.0,
+    "competitors": [
+      {
+        "name": "instalatiiaz.ro",
+        "price": 539.62,
+        "url": "https://www.instalatiiaz.ro",
+        "method": "Google SKU",
+        "diff": -22.4
+      },
+      {
+        "name": "foglia.ro",
+        "price": 567.0,
+        "url": "https://www.foglia.ro",
+        "method": "Google SKU",
+        "diff": -18.4
+      },
+      {
+        "name": "arhitecthuro.ro",
+        "price": 653.0,
+        "url": "https://www.arhitecthuro.ro",
+        "method": "Google SKU",
+        "diff": -6.0
+      }
+    ]
+  },
+  {
+    "timestamp": "2025-12-12T18:46:35.351586",
+    "sku": "R0466AC",
+    "name": "Rezervor incastrat cu clapetă Oleas M1 R0466, alb",
+    "your_price": 695.0,
+    "competitors": [
+      {
+        "name": "hornbach.ro",
+        "price": 495.0,
+        "url": "https://www.hornbach.ro",
+        "method": "Google Name",
+        "diff": -28.8
+      },
+      {
+        "name": "instalatiiaz.ro",
+        "price": 539.62,
+        "url": "https://www.instalatiiaz.ro",
+        "method": "Google SKU",
+        "diff": -22.4
+      },
+      {
+        "name": "qb.ro",
+        "price": 559.0,
+        "url": "https://www.qb.ro",
+        "method": "Google Name",
+        "diff": -19.6
+      },
+      {
+        "name": "foglia.ro",
+        "price": 567.0,
+        "url": "https://www.foglia.ro",
+        "method": "Google SKU",
+        "diff": -18.4
+      },
+      {
+        "name": "badehaus.ro",
+        "price": 608.05,
+        "url": "https://www.badehaus.ro",
+        "method": "Google Name",
+        "diff": -12.5
+      }
+    ]
+  },
+  {
+    "timestamp": "2025-12-12T18:54:24.937329",
+    "sku": "R0466AC",
+    "name": "Rezervor incastrat cu clapetă Oleas M1 R0466, alb",
+    "your_price": 695.0,
+    "competitors": [
+      {
+        "name": "instalatiiaz.ro",
+        "price": 539.62,
+        "url": "https://www.instalatiiaz.ro",
+        "method": "Google SKU",
+        "diff": -22.4
+      },
+      {
+        "name": "foglia.ro",
+        "price": 567.0,
+        "url": "https://www.foglia.ro",
+        "method": "Google SKU",
+        "diff": -18.4
+      },
+      {
+        "name": "bagno.ro",
+        "price": 591.0,
+        "url": "https://www.bagno.ro",
+        "method": "Google SKU",
+        "diff": -15.0
+      },
+      {
+        "name": "arhitecthuro.ro",
+        "price": 653.0,
+        "url": "https://www.arhitecthuro.ro",
+        "method": "Google SKU",
+        "diff": -6.0
+      }
+    ]
+  },
+  {
+    "timestamp": "2025-12-12T19:02:08.544939",
+    "sku": "R0466AC",
+    "name": "Rezervor incastrat cu clapetă Oleas M1 R0466, alb",
+    "your_price": 695.0,
+    "competitors": [
+      {
+        "name": "instalatiiaz.ro",
+        "price": 539.62,
+        "url": "https://www.instalatiiaz.ro",
+        "method": "Google SKU",
+        "diff": -22.4
+      },
+      {
+        "name": "foglia.ro",
+        "price": 567.0,
+        "url": "https://www.foglia.ro",
+        "method": "Google SKU",
+        "diff": -18.4
+      },
+      {
+        "name": "bagno.ro",
+        "price": 591.0,
+        "url": "https://www.bagno.ro",
+        "method": "Google SKU",
+        "diff": -15.0
+      },
+      {
+        "name": "arhitecthuro.ro",
+        "price": 653.0,
+        "url": "https://www.arhitecthuro.ro",
+        "method": "Google SKU",
+        "diff": -6.0
+      }
+    ]
+  },
+  {
+    "timestamp": "2025-12-12T19:28:52.759241",
+    "sku": "R0466AC",
+    "name": "Rezervor incastrat cu clapetă Oleas M1 R0466, alb",
+    "your_price": 695.0,
+    "competitors": [
+      {
+        "name": "instalatiiaz.ro",
+        "price": 539.62,
+        "url": "https://www.instalatiiaz.ro",
+        "method": "Google SKU",
+        "source": "Google SERP",
+        "diff": -22.4
+      },
+      {
+        "name": "foglia.ro",
+        "price": 567.0,
+        "url": "https://www.foglia.ro",
+        "method": "Google SKU",
+        "source": "Google SERP",
+        "diff": -18.4
+      },
+      {
+        "name": "bagno.ro",
+        "price": 591.0,
+        "url": "https://www.bagno.ro",
+        "method": "Google SKU",
+        "source": "Google SERP (Bagno)",
+        "diff": -15.0
+      }
+    ]
+  },
+  {
+    "timestamp": "2025-12-12T19:30:36.831070",
+    "sku": "BD716RO",
+    "name": "Baterie bideu Cerafine O rose cu ventil click‑clack Ideal Standard – montaj pe cadă",
+    "your_price": 571.0,
+    "competitors": [
+      {
+        "name": "general-instal.ro",
+        "price": 564.0,
+        "url": "https://www.general-instal.ro",
+        "method": "Google Name",
+        "source": "Google SERP",
+        "diff": -1.2
+      },
+      {
+        "name": "unimat.ro",
+        "price": 588.73,
+        "url": "https://www.unimat.ro",
+        "method": "Google SKU",
+        "source": "Google SERP",
+        "diff": 3.1
+      },
+      {
+        "name": "sensodays.ro",
+        "price": 589.0,
+        "url": "https://www.sensodays.ro",
+        "method": "Google Name",
+        "source": "Google SERP",
+        "diff": 3.2
+      },
+      {
+        "name": "bagno.ro",
+        "price": 590.0,
+        "url": "https://www.bagno.ro",
+        "method": "Google SKU",
+        "source": "Google SERP (Bagno)",
+        "diff": 3.3
+      },
+      {
+        "name": "neakaisa.ro",
+        "price": 609.0,
+        "url": "https://www.neakaisa.ro",
+        "method": "Google Name",
+        "source": "Google SERP (Neakaisa)",
+        "diff": 6.7
+      }
+    ]
+  },
+  {
+    "timestamp": "2025-12-12T19:32:10.844037",
+    "sku": "T3527V3",
+    "name": "Capac WC Tesi Slim Soft‑Close T3527 367×446 mm, negru mat",
+    "your_price": 514.0,
+    "competitors": [
+      {
+        "name": "sanitino.ro",
+        "price": 493.01,
+        "url": "https://www.sanitino.ro",
+        "method": "Google SKU",
+        "source": "Google HTML",
+        "diff": -4.1
+      }
+    ]
+  },
+  {
+    "timestamp": "2025-12-12T19:45:57.270988",
+    "sku": "R0466AC",
+    "name": "Rezervor incastrat cu clapetă Oleas M1 R0466, alb",
+    "your_price": 695.0,
+    "competitors": [
+      {
+        "name": "instalatiiaz.ro",
+        "price": 539.62,
+        "url": "https://www.instalatiiaz.ro",
+        "method": "Google SKU",
+        "source": "Google SERP",
+        "diff": -22.4
+      },
+      {
+        "name": "foglia.ro",
+        "price": 567.0,
+        "url": "https://www.foglia.ro",
+        "method": "Google SKU",
+        "source": "Google SERP (Foglia)",
+        "diff": -18.4
+      },
+      {
+        "name": "bagno.ro",
+        "price": 591.0,
+        "url": "https://www.bagno.ro",
+        "method": "Google SKU",
+        "source": "Google SERP (Bagno)",
+        "diff": -15.0
+      }
+    ]
+  },
+  {
+    "timestamp": "2025-12-12T19:46:17.390790",
+    "sku": "BD716RO",
+    "name": "Baterie bideu Cerafine O rose cu ventil click‑clack Ideal Standard – montaj pe cadă",
+    "your_price": 571.0,
+    "competitors": [
+      {
+        "name": "general-instal.ro",
+        "price": 564.0,
+        "url": "https://www.general-instal.ro",
+        "method": "Google Name",
+        "source": "Google SERP",
+        "diff": -1.2
+      },
+      {
+        "name": "trendysanitary.ro",
+        "price": 573.26,
+        "url": "https://www.trendysanitary.ro",
+        "method": "Google Name",
+        "source": "Google SERP",
+        "diff": 0.4
+      },
+      {
+        "name": "unimat.ro",
+        "price": 588.73,
+        "url": "https://www.unimat.ro",
+        "method": "Google SKU",
+        "source": "Google SERP",
+        "diff": 3.1
+      },
+      {
+        "name": "sensodays.ro",
+        "price": 589.0,
+        "url": "https://www.sensodays.ro",
+        "method": "Google Name",
+        "source": "Google SERP",
+        "diff": 3.2
+      },
+      {
+        "name": "bagno.ro",
+        "price": 590.0,
+        "url": "https://www.bagno.ro",
+        "method": "Google SKU",
+        "source": "Google SERP (Bagno)",
+        "diff": 3.3
+      }
+    ]
+  },
+  {
+    "timestamp": "2025-12-12T19:46:29.065826",
+    "sku": "T3527V3",
+    "name": "Capac WC Tesi Slim Soft‑Close T3527 367×446 mm, negru mat",
+    "your_price": 514.0,
+    "competitors": [
+      {
+        "name": "sanitino.ro",
+        "price": 493.01,
+        "url": "https://www.sanitino.ro",
+        "method": "Google SKU",
+        "source": "Google HTML",
+        "diff": -4.1
+      }
+    ]
+  },
+  {
+    "timestamp": "2025-12-12T19:48:58.646410",
+    "sku": "T3527V3",
+    "name": "Capac WC Tesi Slim Soft‑Close T3527 367×446 mm, negru mat",
+    "your_price": 514.0,
+    "competitors": [
+      {
+        "name": "sanitino.ro",
+        "price": 493.01,
+        "url": "https://www.sanitino.ro",
+        "method": "Google SKU",
+        "source": "Google HTML",
+        "diff": -4.1
+      }
+    ]
+  },
+  {
+    "timestamp": "2025-12-12T19:53:02.098320",
+    "sku": "T3527V3",
+    "name": "Capac WC Tesi Slim Soft‑Close T3527 367×446 mm, negru mat",
+    "your_price": 514.0,
+    "competitors": [
+      {
+        "name": "sanitino.ro",
+        "price": 493.01,
+        "url": "https://www.sanitino.ro",
+        "method": "Google SKU",
+        "source": "Google HTML",
+        "diff": -4.1
+      }
+    ]
+  },
+  {
+    "timestamp": "2025-12-12T19:54:37.674526",
+    "sku": "T3527V3",
+    "name": "Capac WC Tesi Slim Soft‑Close T3527 367×446 mm, negru mat",
+    "your_price": 514.0,
+    "competitors": [
+      {
+        "name": "sanitino.ro",
+        "price": 493.01,
+        "url": "https://www.sanitino.ro",
+        "method": "Google SKU",
+        "source": "Google HTML",
+        "diff": -4.1
+      }
+    ]
+  },
+  {
+    "timestamp": "2025-12-12T19:55:24.523317",
+    "sku": "T3527V3",
+    "name": "Capac WC Tesi Slim Soft‑Close T3527 367×446 mm, negru mat",
+    "your_price": 514.0,
+    "competitors": [
+      {
+        "name": "sanitino.ro",
+        "price": 493.01,
+        "url": "https://www.sanitino.ro",
+        "method": "Google SKU",
+        "source": "Google HTML",
+        "diff": -4.1
+      }
+    ]
+  },
+  {
+    "timestamp": "2025-12-12T20:05:50.527846",
+    "sku": "T3527V3",
+    "name": "Capac WC Tesi Slim Soft‑Close T3527 367×446 mm, negru mat",
+    "your_price": 514.0,
+    "competitors": []
+  },
+  {
+    "timestamp": "2025-12-12T20:12:05.941348",
+    "sku": "T3527V3",
+    "name": "Capac WC Tesi Slim Soft‑Close T3527 367×446 mm, negru mat",
+    "your_price": 514.0,
+    "competitors": [
+      {
+        "name": "sanitino.ro",
+        "price": 407.45,
+        "url": "https://www.sanitino.ro",
+        "method": "Google SKU",
+        "source": "Google SERP",
+        "diff": -20.7
+      },
+      {
+        "name": "unimat.ro",
+        "price": 506.27,
+        "url": "https://www.unimat.ro",
+        "method": "Google SKU",
+        "source": "Google SERP",
+        "diff": -1.5
+      },
+      {
+        "name": "esanitare.ro",
+        "price": 564.99,
+        "url": "https://www.esanitare.ro",
+        "method": "Google SKU",
+        "source": "Google SERP",
+        "diff": 9.9
+      }
+    ]
+  },
+  {
+    "timestamp": "2025-12-12T20:14:04.101302",
+    "sku": "BD716RO",
+    "name": "Baterie bideu Cerafine O rose cu ventil click‑clack Ideal Standard – montaj pe cadă",
+    "your_price": 571.0,
+    "competitors": [
+      {
+        "name": "general-instal.ro",
+        "price": 564.0,
+        "url": "https://www.general-instal.ro",
+        "method": "Google Name",
+        "source": "Google SERP",
+        "diff": -1.2
+      },
+      {
+        "name": "unimat.ro",
+        "price": 588.73,
+        "url": "https://www.unimat.ro",
+        "method": "Google SKU",
+        "source": "Google SERP",
+        "diff": 3.1
+      },
+      {
+        "name": "sensodays.ro",
+        "price": 589.0,
+        "url": "https://www.sensodays.ro",
+        "method": "Google Name",
+        "source": "Google SERP",
+        "diff": 3.2
+      },
+      {
+        "name": "bagno.ro",
+        "price": 590.0,
+        "url": "https://www.bagno.ro",
+        "method": "Google SKU",
+        "source": "Google SERP (Bagno)",
+        "diff": 3.3
+      },
+      {
+        "name": "foglia.ro",
+        "price": 600.26,
+        "url": "https://www.foglia.ro",
+        "method": "Google Name",
+        "source": "Google SERP (Foglia)",
+        "diff": 5.1
+      }
+    ]
+  },
+  {
+    "timestamp": "2025-12-12T20:14:15.983763",
+    "sku": "R0466AC",
+    "name": "Rezervor incastrat cu clapetă Oleas M1 R0466, alb",
+    "your_price": 695.0,
+    "competitors": [
+      {
+        "name": "instalatiiaz.ro",
+        "price": 539.62,
+        "url": "https://www.instalatiiaz.ro",
+        "method": "Google SKU",
+        "source": "Google SERP",
+        "diff": -22.4
+      },
+      {
+        "name": "foglia.ro",
+        "price": 567.0,
+        "url": "https://www.foglia.ro",
+        "method": "Google SKU",
+        "source": "Google SERP (Foglia)",
+        "diff": -18.4
+      },
+      {
+        "name": "bagno.ro",
+        "price": 591.0,
+        "url": "https://www.bagno.ro",
+        "method": "Google SKU",
+        "source": "Google SERP (Bagno)",
+        "diff": -15.0
+      }
+    ]
+  },
+  {
+    "timestamp": "2025-12-12T20:14:27.639698",
+    "sku": "T3527V3",
+    "name": "Capac WC Tesi Slim Soft‑Close T3527 367×446 mm, negru mat",
+    "your_price": 514.0,
+    "competitors": [
+      {
+        "name": "sanitino.ro",
+        "price": 407.45,
+        "url": "https://www.sanitino.ro",
+        "method": "Google SKU",
+        "source": "Google SERP",
+        "diff": -20.7
+      },
+      {
+        "name": "unimat.ro",
+        "price": 506.27,
+        "url": "https://www.unimat.ro",
+        "method": "Google SKU",
+        "source": "Google SERP",
+        "diff": -1.5
+      },
+      {
+        "name": "esanitare.ro",
+        "price": 564.99,
+        "url": "https://www.esanitare.ro",
+        "method": "Google SKU",
+        "source": "Google SERP",
+        "diff": 9.9
+      }
+    ]
+  }
+]
