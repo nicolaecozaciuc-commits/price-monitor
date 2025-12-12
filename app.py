@@ -487,7 +487,7 @@ def google_stealth_search(page, query, sku_for_match=None, sku_name=None):
                     gq_price = extract_germanquality_price(context)
                     if gq_price and gq_price > 0:
                         if not any(r['domain'] == current_domain for r in results):
-                            if sku_name and extract_dimensions(sku_name):
+                            if sku_name and extract_dimensions(sku):
                                 dim_check = validate_dimensions(sku_name, context)
                                 if not dim_check['valid']:
                                     logger.info(f"      🔴 {current_domain}: {gq_price} Lei - REJECTED (dims: {dim_check['reason']})")
@@ -500,7 +500,7 @@ def google_stealth_search(page, query, sku_for_match=None, sku_name=None):
                     foglia_price = extract_foglia_price(context)
                     if foglia_price and foglia_price > 0:
                         if not any(r['domain'] == current_domain for r in results):
-                            if sku_name and extract_dimensions(sku_name):
+                            if sku_name and extract_dimensions(sku):
                                 dim_check = validate_dimensions(sku_name, context)
                                 if not dim_check['valid']:
                                     logger.info(f"      🔴 {current_domain}: {foglia_price} Lei - REJECTED (dims: {dim_check['reason']})")
@@ -513,7 +513,7 @@ def google_stealth_search(page, query, sku_for_match=None, sku_name=None):
                     bagno_price = extract_bagno_price_fixed(context)
                     if bagno_price and bagno_price > 0:
                         if not any(r['domain'] == current_domain for r in results):
-                            if sku_name and extract_dimensions(sku_name):
+                            if sku_name and extract_dimensions(sku):
                                 dim_check = validate_dimensions(sku_name, context)
                                 if not dim_check['valid']:
                                     logger.info(f"      🔴 {current_domain}: {bagno_price} Lei - REJECTED (dims: {dim_check['reason']})")
@@ -526,7 +526,7 @@ def google_stealth_search(page, query, sku_for_match=None, sku_name=None):
                     neakaisa_price = extract_neakaisa_price(context)
                     if neakaisa_price and neakaisa_price > 0:
                         if not any(r['domain'] == current_domain for r in results):
-                            if sku_name and extract_dimensions(sku_name):
+                            if sku_name and extract_dimensions(sku):
                                 dim_check = validate_dimensions(sku_name, context)
                                 if not dim_check['valid']:
                                     logger.info(f"      🔴 {current_domain}: {neakaisa_price} Lei - REJECTED (dims: {dim_check['reason']})")
@@ -551,7 +551,7 @@ def google_stealth_search(page, query, sku_for_match=None, sku_name=None):
                 
                 if valid_prices:
                     price = min(valid_prices)
-                    if sku_name and extract_dimensions(sku_name):
+                    if sku_name and extract_dimensions(sku):
                         dim_check = validate_dimensions(sku_name, context)
                         if not dim_check['valid']:
                             logger.info(f"      🔴 {current_domain}: {price} Lei - REJECTED (dims: {dim_check['reason']})")
@@ -583,7 +583,7 @@ def google_stealth_search(page, query, sku_for_match=None, sku_name=None):
                     
                     gq_price = extract_germanquality_price(block_text)
                     if gq_price and gq_price > 0:
-                        if sku_name and extract_dimensions(sku_name):
+                        if sku_name and extract_dimensions(sku):
                             dim_check = validate_dimensions(sku_name, block_text)
                             if not dim_check['valid']:
                                 logger.info(f"      🔴 {current_domain}: {gq_price} Lei - REJECTED (dims: {dim_check['reason']})")
@@ -609,7 +609,7 @@ def google_stealth_search(page, query, sku_for_match=None, sku_name=None):
                     if current_domain == 'foglia.ro':
                         foglia_price = extract_foglia_price(block_text)
                         if foglia_price and foglia_price > 0:
-                            if sku_name and extract_dimensions(sku_name):
+                            if sku_name and extract_dimensions(sku):
                                 dim_check = validate_dimensions(sku_name, block_text)
                                 if not dim_check['valid']:
                                     logger.info(f"      🔴 {current_domain}: {foglia_price} Lei - REJECTED (dims: {dim_check['reason']})")
@@ -625,7 +625,7 @@ def google_stealth_search(page, query, sku_for_match=None, sku_name=None):
                     if current_domain == 'bagno.ro':
                         bagno_price = extract_bagno_price_fixed(block_text)
                         if bagno_price and bagno_price > 0:
-                            if sku_name and extract_dimensions(sku_name):
+                            if sku_name and extract_dimensions(sku):
                                 dim_check = validate_dimensions(sku_name, block_text)
                                 if not dim_check['valid']:
                                     logger.info(f"      🔴 {current_domain}: {bagno_price} Lei - REJECTED (dims: {dim_check['reason']})")
@@ -641,7 +641,7 @@ def google_stealth_search(page, query, sku_for_match=None, sku_name=None):
                     if current_domain == 'neakaisa.ro':
                         neakaisa_price = extract_neakaisa_price(block_text)
                         if neakaisa_price and neakaisa_price > 0:
-                            if sku_name and extract_dimensions(sku_name):
+                            if sku_name and extract_dimensions(sku):
                                 dim_check = validate_dimensions(sku_name, block_text)
                                 if not dim_check['valid']:
                                     logger.info(f"      🔴 {current_domain}: {neakaisa_price} Lei - REJECTED (dims: {dim_check['reason']})")
@@ -670,7 +670,7 @@ def google_stealth_search(page, query, sku_for_match=None, sku_name=None):
                     
                     if valid_prices:
                         price = valid_prices[0]
-                        if sku_name and extract_dimensions(sku_name):
+                        if sku_name and extract_dimensions(sku):
                             dim_check = validate_dimensions(sku_name, block_text)
                             if not dim_check['valid']:
                                 logger.info(f"      🔴 {current_domain}: {price} Lei - REJECTED (dims: {dim_check['reason']})")
