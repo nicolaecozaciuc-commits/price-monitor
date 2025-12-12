@@ -71,6 +71,20 @@ def validate_dimensions(sku_name, snippet_text, threshold=0.7):
         'reason': f"Match {len(matches)}/{len(sku_dims_norm)}" if is_valid else f"Mismatch {len(matches)}/{len(sku_dims_norm)}"
     }
 
+# ============ V12.6 - EXTRACTOR UNIVERSAL CU PRIORITATE MAXIMĂ ============
+def extract_instock_price(text):
+    """V12.6 - Prețul cu 'In stock' - PRIORITATE MAXIMĂ - format: 7.767,00 RON · In stock"""
+    match = re.search(r'(\d{1,3}(?:\.\d{3})*,\d{2})\s*RON\s*[·•]\s*In stock', text, re.IGNORECASE)
+    if match:
+        price_str = match.group(1).replace('.', '').replace(',', '.')
+        try:
+            val = float(price_str)
+            if 50 < val < 500000:
+                return val
+        except:
+            pass
+    return None
+
 # ============ SPECIAL EXTRACTORS (V12.2) ============
 def extract_foglia_price(text):
     """Foglia: PREȚ RON · In stock"""
@@ -148,8 +162,8 @@ def extract_sensodays_price_fixed(text):
 
 def filter_single_source_arhitecthuro(results):
     """V11.1 - Elimina arhitecthuro.ro daca apare DOAR intr-o singura sursa"""
-    arhitecthuro_sources = [r['source'] for r in results if r.get('name') == 'arhitecthuro.ro']
-    if len(arhitecthuro_sources) == 1:
+    arhitecthuro_methods = [r['method'] for r in results if r.get('name') == 'arhitecthuro.ro']
+    if len(arhitecthuro_methods) == 1:
         results = [r for r in results if r.get('name') != 'arhitecthuro.ro']
         logger.info(f"   🔻 Arhitecthuro filtered (single source)")
     return results
@@ -341,6 +355,14 @@ def google_stealth_search(page, query, sku_for_match=None, sku_name=None):
             if has_match and current_domain:
                 context = ' '.join(lines[max(0,i-2):min(len(lines),i+3)])
                 
+                # ============ V12.6 PRIORITATE MAXIMĂ: Preț cu "In stock" ============
+                instock_price = extract_instock_price(context)
+                if instock_price and instock_price > 0:
+                    if not any(r['domain'] == current_domain for r in results):
+                        results.append({'domain': current_domain, 'price': instock_price, 'source': 'Google SERP (InStock)'})
+                        logger.info(f"      🟢 {current_domain}: {instock_price} Lei (InStock)")
+                    continue
+                
                 # SPECIAL GERMANQUALITY
                 if current_domain == 'germanquality.ro':
                     gq_price = extract_germanquality_price_fixed(context)
@@ -430,6 +452,15 @@ def google_stealth_search(page, query, sku_for_match=None, sku_name=None):
                     block_end = min(len(lines), domain_line + 7)
                     block_text = ' '.join(lines[block_start:block_end])
                     
+                    # V12.6 PRIORITATE: In stock
+                    instock_price = extract_instock_price(block_text)
+                    if instock_price and instock_price > 0:
+                        results.append({'domain': current_domain, 'price': instock_price, 'source': 'Google SERP (InStock)'})
+                        logger.info(f"      🟢 {current_domain}: {instock_price} Lei (InStock)")
+                        current_domain = None
+                        domain_line = -1
+                        continue
+                    
                     gq_price = extract_germanquality_price_fixed(block_text)
                     if gq_price and gq_price > 0:
                         results.append({'domain': current_domain, 'price': gq_price, 'source': 'Google SERP (GQ)'})
@@ -447,6 +478,15 @@ def google_stealth_search(page, query, sku_for_match=None, sku_name=None):
                     block_start = domain_line
                     block_end = min(len(lines), domain_line + 7)
                     block_text = ' '.join(lines[block_start:block_end])
+                    
+                    # V12.6 PRIORITATE: In stock
+                    instock_price = extract_instock_price(block_text)
+                    if instock_price and instock_price > 0:
+                        results.append({'domain': current_domain, 'price': instock_price, 'source': 'Google SERP (InStock)'})
+                        logger.info(f"      🟢 {current_domain}: {instock_price} Lei (InStock)")
+                        current_domain = None
+                        domain_line = -1
+                        continue
                     
                     # FOGLIA
                     if current_domain == 'foglia.ro':
@@ -741,6 +781,77 @@ def get_debug(filename):
         return send_file(filepath)
     return "Not found", 404
 
+# ============ EXCEL EXPORT (V12.6) ============
+@app.route('/api/report', methods=['POST'])
+def api_report():
+    try:
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, PatternFill, Alignment
+        from openpyxl.utils import get_column_letter
+        from io import BytesIO
+        from datetime import datetime
+        
+        data = request.json or {}
+        products = data.get('products', [])
+        
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Raport Preturi"
+        
+        title_font = Font(bold=True, size=16, color="FFFFFF")
+        title_fill = PatternFill(start_color="2563EB", end_color="2563EB", fill_type="solid")
+        header_font = Font(bold=True, size=11)
+        header_fill = PatternFill(start_color="E5E7EB", end_color="E5E7EB", fill_type="solid")
+        sku_font = Font(bold=True, size=12)
+        sku_fill = PatternFill(start_color="FEF3C7", end_color="FEF3C7", fill_type="solid")
+        
+        ws.merge_cells('A1:E1')
+        ws['A1'] = "RAPORT MONITORIZARE PRETURI"
+        ws['A1'].font = title_font
+        ws['A1'].fill = title_fill
+        ws['A1'].alignment = Alignment(horizontal='center')
+        ws['A2'] = f"Generat: {datetime.now().strftime('%d.%m.%Y %H:%M')}"
+        
+        row = 4
+        for p in products:
+            if not p.get('comps'): continue
+            ws.merge_cells(f'A{row}:E{row}')
+            ws[f'A{row}'] = f"SKU: {p.get('sku', '')} | {p.get('name', '')}"
+            ws[f'A{row}'].font = sku_font
+            ws[f'A{row}'].fill = sku_fill
+            row += 1
+            ws[f'A{row}'] = "Pret Nostru:"
+            ws[f'A{row}'].font = Font(bold=True)
+            ws[f'B{row}'] = f"{p.get('price', 0):.2f} Lei"
+            ws[f'C{row}'] = f"Data: {datetime.now().strftime('%Y-%m-%d')}"
+            row += 1
+            for col, h in enumerate(['Competitor', 'Pret', 'Diferenta', 'Status', 'Metoda'], 1):
+                cell = ws.cell(row=row, column=col, value=h)
+                cell.font = header_font
+                cell.fill = header_fill
+            row += 1
+            for comp in p.get('comps', []):
+                diff = comp.get('diff', 0)
+                status = "▼ MAI IEFTIN" if diff < -5 else "▲ MAI SCUMP" if diff > 5 else "= EGAL"
+                ws.cell(row=row, column=1, value=comp.get('name', ''))
+                ws.cell(row=row, column=2, value=comp.get('price', 0))
+                ws.cell(row=row, column=3, value=f"{'+' if diff > 0 else ''}{diff}%")
+                ws.cell(row=row, column=4, value=status)
+                ws.cell(row=row, column=5, value=comp.get('method', 'Google'))
+                row += 1
+            row += 1
+        
+        for col in range(1, 6):
+            ws.column_dimensions[get_column_letter(col)].width = 18
+        
+        output = BytesIO()
+        wb.save(output)
+        output.seek(0)
+        filename = f"Raport_Preturi_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+        return send_file(output, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', as_attachment=True, download_name=filename)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 if __name__ == '__main__':
-    logger.info("🚀 PriceMonitor v12.2 - GermanQuality+SensoDays MIN fix pe :8080")
+    logger.info("🚀 PriceMonitor v12.6 - InStock priority pe :8080")
     app.run(host='0.0.0.0', port=8080)
