@@ -4,9 +4,12 @@ import time
 import json
 import os
 from urllib.parse import quote_plus
+from datetime import datetime
 from flask import Flask, request, jsonify, render_template, send_file
 from flask_cors import CORS
 from playwright.sync_api import sync_playwright
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 
 app = Flask(__name__, template_folder='templates')
 CORS(app)
@@ -17,7 +20,128 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s | %(message)s', date
 logger = logging.getLogger('PriceMonitor')
 
 DEBUG_DIR = '/root/monitor/debug'
+DATA_DIR = '/root/monitor/data'
 os.makedirs(DEBUG_DIR, exist_ok=True)
+os.makedirs(DATA_DIR, exist_ok=True)
+
+SCANS_FILE = f'{DATA_DIR}/scans.json'
+
+# ============ GESTION DATE SCANATE ============
+def load_scans():
+    """Încarcă datele scanate din fișierul JSON"""
+    if os.path.exists(SCANS_FILE):
+        try:
+            with open(SCANS_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except:
+            return []
+    return []
+
+def save_scan(sku, name, your_price, competitors):
+    """Salvează o scanare în fișierul JSON"""
+    scans = load_scans()
+    
+    scan_entry = {
+        'timestamp': datetime.now().isoformat(),
+        'sku': sku,
+        'name': name,
+        'your_price': your_price,
+        'competitors': competitors
+    }
+    
+    scans.append(scan_entry)
+    
+    with open(SCANS_FILE, 'w', encoding='utf-8') as f:
+        json.dump(scans, f, ensure_ascii=False, indent=2)
+    
+    return scan_entry
+
+def generate_excel_report():
+    """Generează raport Excel din datele scanate"""
+    scans = load_scans()
+    
+    if not scans:
+        return None
+    
+    wb = Workbook()
+    sheet = wb.active
+    sheet.title = 'Raport Prețuri'
+    
+    # Stiluri
+    header_fill = PatternFill(start_color='4472C4', end_color='4472C4', fill_type='solid')
+    header_font = Font(bold=True, color='FFFFFF', size=11)
+    border = Border(
+        left=Side(style='thin'),
+        right=Side(style='thin'),
+        top=Side(style='thin'),
+        bottom=Side(style='thin')
+    )
+    
+    # Header-uri coloane
+    headers = ['Dată', 'SKU', 'Nume Produs', 'Preț Nostru', 'Competitor', 'Preț Competitor', 'Diferență (%)', 'Metodă']
+    
+    for col, header in enumerate(headers, 1):
+        cell = sheet.cell(row=1, column=col)
+        cell.value = header
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+        cell.border = border
+    
+    # Lățimi coloane
+    sheet.column_dimensions['A'].width = 18
+    sheet.column_dimensions['B'].width = 15
+    sheet.column_dimensions['C'].width = 30
+    sheet.column_dimensions['D'].width = 13
+    sheet.column_dimensions['E'].width = 20
+    sheet.column_dimensions['F'].width = 13
+    sheet.column_dimensions['G'].width = 13
+    sheet.column_dimensions['H'].width = 15
+    
+    # Completează date
+    row = 2
+    for scan in scans:
+        timestamp = scan['timestamp'][:10]  # Doar data, nu și ora
+        sku = scan['sku']
+        name = scan['name'][:40]  # Limitează lungimea
+        your_price = scan['your_price']
+        
+        for competitor in scan['competitors']:
+            sheet.cell(row=row, column=1).value = timestamp
+            sheet.cell(row=row, column=2).value = sku
+            sheet.cell(row=row, column=3).value = name
+            sheet.cell(row=row, column=4).value = your_price
+            sheet.cell(row=row, column=5).value = competitor['name']
+            sheet.cell(row=row, column=6).value = competitor['price']
+            sheet.cell(row=row, column=7).value = competitor.get('diff', 0)
+            sheet.cell(row=row, column=8).value = competitor.get('method', 'N/A')
+            
+            # Formatare
+            for col in range(1, 9):
+                cell = sheet.cell(row=row, column=col)
+                cell.border = border
+                cell.alignment = Alignment(horizontal='center', vertical='center')
+                
+                # Formatare numere
+                if col in [4, 6]:  # Preț
+                    cell.number_format = '#,##0.00 "Lei"'
+                elif col == 7:  # Diferență
+                    cell.number_format = '0.00"%"'
+                    # Colorează diferența
+                    diff_val = competitor.get('diff', 0)
+                    if diff_val < -10:
+                        cell.font = Font(color='008000', bold=True)  # Verde - mai ieftin
+                    elif diff_val > 10:
+                        cell.font = Font(color='FF0000', bold=True)  # Roșu - mai scump
+            
+            row += 1
+    
+    # Salvează Excel-ul
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    filename = f'{DATA_DIR}/Raport_Preturi_{timestamp}.xlsx'
+    wb.save(filename)
+    
+    return filename
 
 # ============ DIMENSION VALIDATION (V10.7) ============
 def extract_dimensions(text):
@@ -734,9 +858,33 @@ def index():
 @app.route('/api/check', methods=['POST'])
 def api_check():
     data = request.json
+    sku = data.get('sku', '')
+    name = data.get('name', '')
     your_price = float(data.get('price', 0) or 0)
-    results = scan_product(data.get('sku', ''), data.get('name', ''), your_price)
+    
+    results = scan_product(sku, name, your_price)
+    
+    # Salvează scanarea în JSON
+    save_scan(sku, name, your_price, results)
+    
     return jsonify({"status": "success", "competitors": results})
+
+@app.route('/api/report', methods=['GET'])
+def api_report():
+    """Generează și descarcă raportul Excel"""
+    try:
+        filepath = generate_excel_report()
+        if filepath and os.path.exists(filepath):
+            return send_file(filepath, as_attachment=True, download_name=f'Raport_Preturi_{datetime.now().strftime("%Y%m%d_%H%M%S")}.xlsx')
+        return jsonify({"status": "error", "message": "Nu sunt date de generat"}), 404
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route('/api/scans', methods=['GET'])
+def api_scans():
+    """Returneaza lista de scanari"""
+    scans = load_scans()
+    return jsonify({"status": "success", "count": len(scans), "scans": scans})
 
 @app.route('/debug/<filename>')
 def get_debug(filename):
@@ -746,5 +894,5 @@ def get_debug(filename):
     return "Not found", 404
 
 if __name__ == '__main__':
-    logger.info("🚀 PriceMonitor v10.8 (Foglia+Bagno+GermanQuality+Neakaisa, Metoda 3 BLOCKED filtered) pe :8080")
+    logger.info("🚀 PriceMonitor v10.8+ (cu Raport Excel) pe :8080")
     app.run(host='0.0.0.0', port=8080)
