@@ -57,88 +57,170 @@ def save_scan(sku, name, your_price, competitors):
     return scan_entry
 
 def generate_excel_report():
-    """Generează raport Excel din datele scanate"""
+    """Generează raport Excel frumos și ușor de citit"""
     scans = load_scans()
     
     if not scans:
         return None
     
     wb = Workbook()
-    sheet = wb.active
-    sheet.title = 'Raport Prețuri'
+    
+    # Sheet 1: Rezumat
+    ws = wb.active
+    ws.title = 'Rezumat'
     
     # Stiluri
+    title_fill = PatternFill(start_color='1F4E78', end_color='1F4E78', fill_type='solid')
+    title_font = Font(bold=True, color='FFFFFF', size=14)
+    
     header_fill = PatternFill(start_color='4472C4', end_color='4472C4', fill_type='solid')
     header_font = Font(bold=True, color='FFFFFF', size=11)
-    border = Border(
-        left=Side(style='thin'),
-        right=Side(style='thin'),
-        top=Side(style='thin'),
-        bottom=Side(style='thin')
+    
+    product_fill = PatternFill(start_color='D9E1F2', end_color='D9E1F2', fill_type='solid')
+    product_font = Font(bold=True, size=11)
+    
+    competitor_fill = PatternFill(start_color='E7E6E6', end_color='E7E6E6', fill_type='solid')
+    
+    border_thin = Border(
+        left=Side(style='thin', color='000000'),
+        right=Side(style='thin', color='000000'),
+        top=Side(style='thin', color='000000'),
+        bottom=Side(style='thin', color='000000')
     )
     
-    # Header-uri coloane
-    headers = ['Dată', 'SKU', 'Nume Produs', 'Preț Nostru', 'Competitor', 'Preț Competitor', 'Diferență (%)', 'Metodă']
+    # Titlu
+    ws.merge_cells('A1:H1')
+    title = ws['A1']
+    title.value = 'RAPORT MONITORIZARE PREȚURI'
+    title.font = title_font
+    title.fill = title_fill
+    title.alignment = Alignment(horizontal='center', vertical='center')
+    ws.row_dimensions[1].height = 25
     
-    for col, header in enumerate(headers, 1):
-        cell = sheet.cell(row=1, column=col)
-        cell.value = header
-        cell.font = header_font
-        cell.fill = header_fill
-        cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
-        cell.border = border
+    # Data generării
+    ws.merge_cells('A2:H2')
+    date_cell = ws['A2']
+    date_cell.value = f"Generat: {datetime.now().strftime('%d.%m.%Y %H:%M')}"
+    date_cell.font = Font(italic=True, size=10)
+    date_cell.alignment = Alignment(horizontal='right')
+    
+    # Gol
+    ws.row_dimensions[3].height = 5
+    
+    row = 4
+    
+    for scan in scans:
+        sku = scan.get('sku', 'N/A')
+        name = scan.get('name', 'N/A')[:50]
+        your_price = scan.get('your_price', 0)
+        competitors = scan.get('competitors', [])
+        timestamp = scan.get('timestamp', '').split('T')[0]
+        
+        # Header produs
+        ws.merge_cells(f'A{row}:H{row}')
+        prod_header = ws[f'A{row}']
+        prod_header.value = f"SKU: {sku} | {name}"
+        prod_header.font = product_font
+        prod_header.fill = product_fill
+        prod_header.border = border_thin
+        prod_header.alignment = Alignment(horizontal='left', vertical='center', wrap_text=True)
+        ws.row_dimensions[row].height = 20
+        row += 1
+        
+        # Info produs
+        ws[f'A{row}'].value = 'Preț Nostru:'
+        ws[f'A{row}'].font = Font(bold=True)
+        ws[f'B{row}'].value = f"{your_price:.2f} Lei"
+        ws[f'B{row}'].font = Font(bold=True, color='008000', size=12)
+        ws[f'C{row}'].value = f'Data: {timestamp}'
+        ws[f'C{row}'].font = Font(italic=True, size=9)
+        ws.row_dimensions[row].height = 18
+        row += 1
+        
+        # Header competitori
+        headers = ['Competitor', 'Preț', 'Diferență', 'Status', 'Metodă']
+        for col, header in enumerate(headers, 1):
+            cell = ws.cell(row=row, column=col)
+            cell.value = header
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.border = border_thin
+            cell.alignment = Alignment(horizontal='center', vertical='center')
+        ws.row_dimensions[row].height = 16
+        row += 1
+        
+        # Competitori
+        for comp in competitors:
+            domain = comp.get('name', 'N/A')
+            price = comp.get('price', 0)
+            diff = comp.get('diff', 0)
+            method = comp.get('method', 'N/A')
+            
+            # Culoare status
+            if diff < -10:
+                status_color = '008000'
+                status_text = '✓ IEFTIN'
+            elif diff > 10:
+                status_color = 'FF0000'
+                status_text = '✗ SCUMP'
+            else:
+                status_color = '000000'
+                status_text = '= EGAL'
+            
+            ws[f'A{row}'].value = domain
+            ws[f'B{row}'].value = price
+            ws[f'B{row}'].number_format = '#,##0.00 "Lei"'
+            ws[f'C{row}'].value = f"{diff:+.1f}%"
+            ws[f'C{row}'].font = Font(bold=True, color=status_color)
+            ws[f'D{row}'].value = status_text
+            ws[f'D{row}'].font = Font(color=status_color, bold=True)
+            ws[f'E{row}'].value = method
+            
+            for col in range(1, 6):
+                ws.cell(row=row, column=col).fill = competitor_fill
+                ws.cell(row=row, column=col).border = border_thin
+                ws.cell(row=row, column=col).alignment = Alignment(horizontal='center', vertical='center')
+            
+            ws.row_dimensions[row].height = 16
+            row += 1
+        
+        # Gol între produse
+        ws.row_dimensions[row].height = 8
+        row += 1
     
     # Lățimi coloane
-    sheet.column_dimensions['A'].width = 18
-    sheet.column_dimensions['B'].width = 15
-    sheet.column_dimensions['C'].width = 30
-    sheet.column_dimensions['D'].width = 13
-    sheet.column_dimensions['E'].width = 20
-    sheet.column_dimensions['F'].width = 13
-    sheet.column_dimensions['G'].width = 13
-    sheet.column_dimensions['H'].width = 15
+    ws.column_dimensions['A'].width = 18
+    ws.column_dimensions['B'].width = 15
+    ws.column_dimensions['C'].width = 12
+    ws.column_dimensions['D'].width = 12
+    ws.column_dimensions['E'].width = 18
     
-    # Completează date
-    row = 2
-    for scan in scans:
-        timestamp = scan['timestamp'][:10]  # Doar data, nu și ora
-        sku = scan['sku']
-        name = scan['name'][:40]  # Limitează lungimea
-        your_price = scan['your_price']
-        
-        for competitor in scan['competitors']:
-            sheet.cell(row=row, column=1).value = timestamp
-            sheet.cell(row=row, column=2).value = sku
-            sheet.cell(row=row, column=3).value = name
-            sheet.cell(row=row, column=4).value = your_price
-            sheet.cell(row=row, column=5).value = competitor['name']
-            sheet.cell(row=row, column=6).value = competitor['price']
-            sheet.cell(row=row, column=7).value = competitor.get('diff', 0)
-            sheet.cell(row=row, column=8).value = competitor.get('method', 'N/A')
-            
-            # Formatare
-            for col in range(1, 9):
-                cell = sheet.cell(row=row, column=col)
-                cell.border = border
-                cell.alignment = Alignment(horizontal='center', vertical='center')
-                
-                # Formatare numere
-                if col in [4, 6]:  # Preț
-                    cell.number_format = '#,##0.00 "Lei"'
-                elif col == 7:  # Diferență
-                    cell.number_format = '0.00"%"'
-                    # Colorează diferența
-                    diff_val = competitor.get('diff', 0)
-                    if diff_val < -10:
-                        cell.font = Font(color='008000', bold=True)  # Verde - mai ieftin
-                    elif diff_val > 10:
-                        cell.font = Font(color='FF0000', bold=True)  # Roșu - mai scump
-            
-            row += 1
+    # Sheet 2: Statistici
+    ws2 = wb.create_sheet('Statistici')
+    
+    ws2['A1'].value = 'STATISTICI'
+    ws2['A1'].font = Font(bold=True, size=12, color='FFFFFF')
+    ws2['A1'].fill = title_fill
+    ws2['A1'].alignment = Alignment(horizontal='center')
+    ws2.merge_cells('A1:D1')
+    
+    total_scans = len(scans)
+    total_competitors = sum(len(s.get('competitors', [])) for s in scans)
+    
+    ws2['A3'].value = 'Total Produse Scanate:'
+    ws2['B3'].value = total_scans
+    ws2['B3'].font = Font(bold=True, size=12, color='0070C0')
+    
+    ws2['A4'].value = 'Total Competitori Găsiți:'
+    ws2['B4'].value = total_competitors
+    ws2['B4'].font = Font(bold=True, size=12, color='0070C0')
+    
+    ws2.column_dimensions['A'].width = 25
+    ws2.column_dimensions['B'].width = 15
     
     # Salvează Excel-ul
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    filename = f'{DATA_DIR}/Raport_Preturi_{timestamp}.xlsx'
+    filename = f'{DATA_DIR}/Raport_Preturi_FRUMOS_{timestamp}.xlsx'
     wb.save(filename)
     
     return filename
