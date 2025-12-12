@@ -96,8 +96,6 @@ const Dashboard = () => {
             if (rows.length < 2) return alert("CSV Invalid sau gol");
             const headers = rows[0];
             const normHeaders = headers.map(h => normalize(h));
-            console.log("=== DEBUG CSV ===");
-            console.log("Headers:", headers);
             
             let iSku = findColumnIndex(normHeaders, ['sku', 'cod', 'codprodus']);
             let iName = findColumnIndex(normHeaders, ['nume', 'numeprodus', 'titlu', 'name', 'title']);
@@ -105,7 +103,6 @@ const Dashboard = () => {
             if (iPrice === -1) iPrice = findColumnIndex(normHeaders, ['pret', 'price'], ['promotional', 'promo', 'concurent']);
             let iImg = findColumnIndex(normHeaders, ['imagini', 'images', 'imagine', 'poza', 'image']);
             
-            console.log("Index SKU:", iSku, "Nume:", iName, "Pret:", iPrice);
             if (iSku === -1) return alert("Nu găsesc coloana SKU!");
             
             const parsed = rows.slice(1).map((r, k) => {
@@ -118,7 +115,6 @@ const Dashboard = () => {
                 return { id: k, sku, name, price, image: imgUrl, comps: [], lastCheck: null };
             }).filter(x => x && x.sku);
             
-            console.log("Produse:", parsed.length, "Cu preț:", parsed.filter(p => p.price > 0).length);
             setProducts(parsed);
             setSelected(new Set());
             setStats({total: parsed.length, checked: 0, withPrice: parsed.filter(p => p.price > 0).length});
@@ -151,7 +147,11 @@ const Dashboard = () => {
     const filteredProducts = products.filter(p => 
         p.sku.toLowerCase().includes(searchTerm.toLowerCase()) || 
         p.name.toLowerCase().includes(searchTerm.toLowerCase())
-    );
+    ).sort((a, b) => {
+        const aSelected = selected.has(a.id) ? 0 : 1;
+        const bSelected = selected.has(b.id) ? 0 : 1;
+        return aSelected - bSelected;
+    });
 
     const runScanQueue = (queueIds) => {
         if (!queueIds.length) return alert("Nimic de scanat!");
@@ -263,7 +263,7 @@ const Dashboard = () => {
 
             <div className="bg-[#1a1a1a] rounded-xl border border-[#333] overflow-x-auto">
                 <table className="w-full text-left text-sm text-gray-300">
-                    <thead className="bg-black text-gray-500 uppercase text-xs">
+                    <thead className="bg-black text-gray-500 uppercase text-xs sticky top-0">
                         <tr>
                             <th className="p-3 w-12 text-center"><input type="checkbox" onChange={toggleAll} checked={filteredProducts.length > 0 && selected.size === filteredProducts.length}/></th>
                             <th className="p-3">PRODUS</th>
@@ -279,7 +279,7 @@ const Dashboard = () => {
                             const minCompPrice = p.comps?.length > 0 ? Math.min(...p.comps.map(c => c.price)) : null;
                             const isCheaperThanAll = minCompPrice && p.price > 0 && p.price <= minCompPrice;
                             return (
-                                <tr key={p.id} className={`hover:bg-[#222] transition ${selected.has(p.id) ? 'bg-[#2a2a35]' : ''} ${checkingId === p.id ? 'bg-blue-900/20' : ''}`}>
+                                <tr key={p.id} className={`hover:bg-[#222] transition ${selected.has(p.id) ? 'bg-[#2a2a35] border-l-4 border-blue-500' : ''} ${checkingId === p.id ? 'bg-blue-900/20' : ''}`}>
                                     <td className="p-3 text-center"><input type="checkbox" checked={selected.has(p.id)} onChange={() => toggleSelect(p.id)}/></td>
                                     <td className="p-3">
                                         <div className="flex items-start gap-3">
