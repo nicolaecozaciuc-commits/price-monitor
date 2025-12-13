@@ -681,20 +681,38 @@ def scan_product(sku, name, your_price=0):
         page = context.new_page()
         
         try:
-            logger.info(f"   🔍 Google #1: SKU...")
-            google_results = google_stealth_search(page, sku, sku, sku_name=name)
+            # ============ V13: Google #1 - SKU SIMPLU (fără "pret RON") - PRIMUL! ============
+            logger.info(f"   🔍 Google #1: SKU simplu...")
+            google_results_simple = google_stealth_search(page, sku, f"{sku}_simple", sku_name=name, add_price_suffix=False)
             
-            for r in google_results:
+            for r in google_results_simple:
                 if r['price'] > 0:
                     found.append({
                         'name': r['domain'],
                         'price': r['price'],
                         'url': f"https://www.{r['domain']}",
-                        'method': 'Google SKU'
+                        'method': 'Google Simple'
                     })
+                    logger.info(f"      🔵 {r['domain']}: {r['price']} Lei (simplu)")
             
+            # ============ Google #2: SKU + "pret RON" ============
+            if len(found) < 5:
+                logger.info(f"   🔍 Google #2: SKU + pret...")
+                google_results = google_stealth_search(page, sku, sku, sku_name=name, add_price_suffix=True)
+                
+                for r in google_results:
+                    if r['price'] > 0 and not any(f['name'] == r['domain'] for f in found):
+                        found.append({
+                            'name': r['domain'],
+                            'price': r['price'],
+                            'url': f"https://www.{r['domain']}",
+                            'method': 'Google SKU'
+                        })
+                        logger.info(f"      🟢 {r['domain']}: {r['price']} Lei (SKU+pret)")
+            
+            # ============ Google #3: Denumire + "pret RON" ============
             if len(found) < 5 and name and len(name) > 10:
-                logger.info(f"   🔍 Google #2: Denumire...")
+                logger.info(f"   🔍 Google #3: Denumire...")
                 name_words = name.split()[:6]
                 name_query = ' '.join(name_words)
                 if sku.upper() not in name_query.upper():
@@ -711,21 +729,6 @@ def scan_product(sku, name, your_price=0):
                             'method': 'Google Name'
                         })
                         logger.info(f"      🟡 {r['domain']}: {r['price']} Lei (din denumire)")
-            
-            # ============ V12.7 ADĂUGAT: Google #3 - Căutare simplă doar cu SKU ============
-            if len(found) < 5:
-                logger.info(f"   🔍 Google #3: SKU simplu...")
-                google_results_simple = google_stealth_search(page, sku, f"{sku}_simple", sku_name=name, add_price_suffix=False)
-                
-                for r in google_results_simple:
-                    if r['price'] > 0 and not any(f['name'] == r['domain'] for f in found):
-                        found.append({
-                            'name': r['domain'],
-                            'price': r['price'],
-                            'url': f"https://www.{r['domain']}",
-                            'method': 'Google Simple'
-                        })
-                        logger.info(f"      🔵 {r['domain']}: {r['price']} Lei (simplu)")
             
             if len(found) < 3:
                 logger.info(f"   🔍 Bing completează...")
@@ -868,5 +871,5 @@ def api_report():
         return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
-    logger.info("🚀 PriceMonitor v12.7 - Google #3 simplu pe :8080")
+    logger.info("🚀 PriceMonitor v13 - SKU simplu PRIMUL pe :8080")
     app.run(host='0.0.0.0', port=8080)
