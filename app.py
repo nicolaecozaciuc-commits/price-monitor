@@ -168,6 +168,71 @@ def filter_single_source_arhitecthuro(results):
         logger.info(f"   🔻 Arhitecthuro filtered (single source)")
     return results
 
+# ============ V13.1 ADĂUGAT: Actualizare prețuri cu InStock din debug file ============
+def update_prices_with_instock(found, sku):
+    """V13.1 - Citește debug file și actualizează prețurile cu cele InStock (mai precise)"""
+    debug_file = f"{DEBUG_DIR}/google_{sku}_simple.txt"
+    try:
+        if not os.path.exists(debug_file):
+            return found
+        
+        with open(debug_file, 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        # Pattern pentru "X.XXX,XX RON · În stoc/In stock" urmat de domain
+        # Sau domain urmat de preț InStock
+        instock_prices = {}
+        
+        # Căutăm linii cu preț InStock
+        lines = content.split('\n')
+        for i, line in enumerate(lines):
+            # Pattern: "7.766,98 RON · În stoc" sau "7.767,00 RON · In stock"
+            match = re.search(r'(\d{1,3}(?:\.\d{3})*,\d{2})\s*RON\s*[·•]\s*[ÎI]n stoc(?:k)?', line, re.IGNORECASE)
+            if match:
+                price_str = match.group(1).replace('.', '').replace(',', '.')
+                try:
+                    price = float(price_str)
+                    if 50 < price < 500000:
+                        # Căutăm domeniul în liniile din jur (±5 linii)
+                        context = '\n'.join(lines[max(0,i-5):min(len(lines),i+5)])
+                        domain_match = re.search(r'([a-z0-9-]+\.ro)', context.lower())
+                        if domain_match:
+                            domain = domain_match.group(1)
+                            if domain not in ['compari.ro', 'google.ro'] and not any(b in domain for b in ['google', 'bing', 'doarbai', 'termohabitat']):
+                                # Salvăm doar dacă nu avem deja sau dacă prețul e diferit
+                                if domain not in instock_prices:
+                                    instock_prices[domain] = price
+                except:
+                    pass
+        
+        # Actualizăm prețurile din found cu cele InStock
+        updated = 0
+        for item in found:
+            domain = item.get('name', '')
+            if domain in instock_prices:
+                old_price = item['price']
+                new_price = instock_prices[domain]
+                if abs(old_price - new_price) > 10:  # Diferență semnificativă
+                    item['price'] = new_price
+                    updated += 1
+                    logger.info(f"      🔄 {domain}: {old_price} → {new_price} Lei (InStock)")
+        
+        # Adăugăm domenii noi găsite cu InStock care nu sunt în found
+        for domain, price in instock_prices.items():
+            if not any(f['name'] == domain for f in found):
+                found.append({
+                    'name': domain,
+                    'price': price,
+                    'url': f"https://www.{domain}",
+                    'method': 'InStock Update'
+                })
+                logger.info(f"      ➕ {domain}: {price} Lei (InStock nou)")
+        
+        return found
+    except Exception as e:
+        logger.info(f"   ⚠️ InStock update error: {str(e)[:30]}")
+        return found
+
 BLOCKED = ['u003e', 'google', 'bing', 'microsoft', 'facebook', 'youtube', 'doarbai', 'termohabitat', 'wikipedia', 'amazon', 'ebay', 'compari.ro']
 
 SEARCH_URLS = {
@@ -695,6 +760,9 @@ def scan_product(sku, name, your_price=0):
                     })
                     logger.info(f"      🔵 {r['domain']}: {r['price']} Lei (simplu)")
             
+            # ============ V13.1 ADĂUGAT: Actualizare prețuri cu InStock ============
+            found = update_prices_with_instock(found, sku)
+            
             # ============ Google #2: SKU + "pret RON" ============
             if len(found) < 5:
                 logger.info(f"   🔍 Google #2: SKU + pret...")
@@ -871,5 +939,5 @@ def api_report():
         return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
-    logger.info("🚀 PriceMonitor v13 - SKU simplu PRIMUL pe :8080")
+    logger.info("🚀 PriceMonitor v13.1 - InStock update pe :8080")
     app.run(host='0.0.0.0', port=8080)
