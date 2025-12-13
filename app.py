@@ -233,6 +233,82 @@ def update_prices_with_instock(found, sku):
         logger.info(f"   ⚠️ InStock update error: {str(e)[:30]}")
         return found
 
+# ============ V13.2 ADĂUGAT: Extrage prețuri CORECT - domeniu apoi preț DUPĂ ============
+def extract_serp_domain_prices(found, sku):
+    """V13.2 - Citește debug file, găsește domeniu → preț în liniile URMĂTOARE"""
+    debug_file = f"{DEBUG_DIR}/google_{sku}_simple.txt"
+    try:
+        if not os.path.exists(debug_file):
+            return found
+        
+        with open(debug_file, 'r', encoding='utf-8') as f:
+            lines = f.read().split('\n')
+        
+        domain_prices = {}
+        blocked = ['google', 'bing', 'doarbai', 'termohabitat', 'compari.ro', 'wikipedia', 'amazon', 'ebay', 'u003e', 'www.ro']
+        
+        for i, line in enumerate(lines):
+            # Caut domeniu.ro în linie
+            domain_match = re.search(r'^([a-z0-9-]+\.ro)$', line.strip().lower())
+            if not domain_match:
+                domain_match = re.search(r'https?://(?:www\.)?([a-z0-9-]+\.ro)', line.lower())
+            
+            if domain_match:
+                domain = domain_match.group(1)
+                
+                # Skip dacă e blocat
+                if any(b in domain for b in blocked):
+                    continue
+                
+                # Caut preț doar în liniile URMĂTOARE (i+1 până la i+6)
+                for j in range(i+1, min(i+7, len(lines))):
+                    next_line = lines[j]
+                    
+                    # Opresc dacă găsesc alt domeniu
+                    if re.search(r'([a-z0-9-]+\.ro)', next_line.lower()) and j > i+1:
+                        if not re.search(r'https?://', next_line.lower()):
+                            break
+                    
+                    # Caut preț cu format X.XXX,XX RON
+                    price_match = re.search(r'(\d{1,3}(?:\.\d{3})*,\d{2})\s*RON', next_line)
+                    if price_match:
+                        price_str = price_match.group(1).replace('.', '').replace(',', '.')
+                        try:
+                            price = float(price_str)
+                            if 50 < price < 500000:
+                                # Salvez doar prima găsire pentru fiecare domeniu
+                                if domain not in domain_prices:
+                                    domain_prices[domain] = price
+                                break
+                        except:
+                            pass
+        
+        # Actualizez prețurile din found
+        for item in found:
+            domain = item.get('name', '')
+            if domain in domain_prices:
+                old_price = item['price']
+                new_price = domain_prices[domain]
+                if abs(old_price - new_price) > 1:  # Diferență > 1 Lei
+                    logger.info(f"      🔄 {domain}: {old_price} → {new_price} Lei (SERP fix)")
+                    item['price'] = new_price
+        
+        # Adaug domenii noi
+        for domain, price in domain_prices.items():
+            if not any(f['name'] == domain for f in found):
+                found.append({
+                    'name': domain,
+                    'price': price,
+                    'url': f"https://www.{domain}",
+                    'method': 'SERP Domain'
+                })
+                logger.info(f"      ➕ {domain}: {price} Lei (SERP nou)")
+        
+        return found
+    except Exception as e:
+        logger.info(f"   ⚠️ SERP extract error: {str(e)[:30]}")
+        return found
+
 BLOCKED = ['u003e', 'google', 'bing', 'microsoft', 'facebook', 'youtube', 'doarbai', 'termohabitat', 'wikipedia', 'amazon', 'ebay', 'compari.ro']
 
 SEARCH_URLS = {
@@ -763,6 +839,9 @@ def scan_product(sku, name, your_price=0):
             # ============ V13.1 ADĂUGAT: Actualizare prețuri cu InStock ============
             found = update_prices_with_instock(found, sku)
             
+            # ============ V13.2 ADĂUGAT: Fix prețuri domeniu → preț DUPĂ ============
+            found = extract_serp_domain_prices(found, sku)
+            
             # ============ Google #2: SKU + "pret RON" ============
             if len(found) < 5:
                 logger.info(f"   🔍 Google #2: SKU + pret...")
@@ -939,5 +1018,5 @@ def api_report():
         return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
-    logger.info("🚀 PriceMonitor v13.1 - InStock update pe :8080")
+    logger.info("🚀 PriceMonitor v13.2 - SERP domain fix pe :8080")
     app.run(host='0.0.0.0', port=8080)
